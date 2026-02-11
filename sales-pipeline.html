@@ -2386,20 +2386,13 @@ function SalesPipelineApp() {
 
     return (
       <div style={{
-        position: "fixed",
-        top: 56,
-        left: 0,
-        bottom: 0,
-        width: showCallPanel ? "calc(100vw - 420px)" : 700,
-        maxWidth: showCallPanel ? "calc(100vw - 420px)" : "60vw",
         background: colors.surface,
-        borderRight: `1px solid ${colors.border}`,
-        zIndex: 100,
+        borderLeft: showCallPanel ? "none" : `1px solid ${colors.border}`,
+        borderRight: showCallPanel ? `1px solid ${colors.border}` : "none",
         display: "flex",
         flexDirection: "column",
-        boxShadow: "4px 0 20px rgba(0,0,0,0.3)"
+        overflow: "hidden"
       }}>
-        <div style={{ background: "#ff0000", color: "#fff", padding: 8, fontSize: 14, fontWeight: 700 }}>YENİ PANEL - V2</div>
         <div style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 16 }}>{company.name}</div>
@@ -2508,17 +2501,11 @@ function SalesPipelineApp() {
 
     return (
       <div style={{
-        position: "fixed",
-        top: 56,
-        right: 0,
-        bottom: 0,
-        width: 400,
         background: colors.surface,
         borderLeft: `1px solid ${colors.border}`,
-        zIndex: 100,
         display: "flex",
         flexDirection: "column",
-        boxShadow: "-4px 0 20px rgba(0,0,0,0.3)"
+        overflow: "hidden"
       }}>
         <div style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -2592,26 +2579,34 @@ function SalesPipelineApp() {
         </div>
       </div>
 
-      {/* Content - shifts when panels open */}
+      {/* Main Grid Layout */}
       <div style={{
-        ...s.content,
-        marginLeft: expandedFirm ? (showCallPanel ? "calc(100vw - 420px)" : 700) : 0,
-        marginRight: showCallPanel && !expandedFirm ? 400 : 0,
-        transition: "margin 0.2s ease"
+        display: "grid",
+        gridTemplateColumns: expandedFirm
+          ? (showCallPanel ? "2fr 1fr" : "1fr 2fr")
+          : "1fr",
+        flex: 1,
+        overflow: "hidden",
+        transition: "grid-template-columns 0.2s ease"
       }}>
-        {activeTab === "weekly" && renderWeeklyView()}
-        {activeTab === "dashboard" && renderDashboard()}
-        {activeTab === "companies" && renderAllCompanies()}
-        {activeTab === "competitors" && renderCompetitors()}
-        {activeTab === "todos" && renderTodos()}
-        {activeTab === "actions" && renderActions()}
+        {/* Left Panel - Weekly View or Company Detail */}
+        {!showCallPanel && (
+          <div style={{ ...s.content, overflow: "auto" }}>
+            {activeTab === "weekly" && renderWeeklyView()}
+            {activeTab === "dashboard" && renderDashboard()}
+            {activeTab === "companies" && renderAllCompanies()}
+            {activeTab === "competitors" && renderCompetitors()}
+            {activeTab === "todos" && renderTodos()}
+            {activeTab === "actions" && renderActions()}
+          </div>
+        )}
+
+        {/* Company Detail Panel (shows in middle or left position) */}
+        {expandedFirm && renderCompanyPanel()}
+
+        {/* Call Panel (Right) */}
+        {showCallPanel && renderCallPanel()}
       </div>
-
-      {/* Company Detail Panel (Left) */}
-      {renderCompanyPanel()}
-
-      {/* Call Panel (Right) */}
-      {renderCallPanel()}
 
       {/* Other Modals */}
       {renderModals()}
