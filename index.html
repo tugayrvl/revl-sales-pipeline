@@ -2422,26 +2422,20 @@ function SalesPipelineApp() {
           {contacts.map(ct => {
             const profile = getProfile(ct.id);
             return (
-              <div key={ct.id} style={{ ...s.card, padding: 12, marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                      {ct.name}
-                      {ct.reached && <Badge color={colors.green} bg={colors.greenDim}>✓</Badge>}
-                    </div>
-                    <div style={{ fontSize: 11, color: colors.textMuted }}>{ct.title}</div>
+              <div key={ct.id} style={{ ...s.card, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12 }}>
+                {/* İsim ve Ünvan */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                    {ct.name}
+                    {ct.reached && <Badge color={colors.green} bg={colors.greenDim}>✓</Badge>}
                   </div>
-                  <select style={{ ...s.select, fontSize: 10, padding: "2px 6px" }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
-                    <option value="">—</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                  </select>
+                  <div style={{ fontSize: 11, color: colors.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ct.title}</div>
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {/* Telefon Numaraları - Alt Alta */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {ct.phone && (
                     <button
-                      style={{ ...s.btn("success"), fontSize: 11 }}
+                      style={{ ...s.btn("success"), fontSize: 11, padding: "4px 8px" }}
                       onClick={() => {
                         setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone, result: "", notes: "", date: new Date().toISOString() });
                         setShowCallPanel(true);
@@ -2452,7 +2446,7 @@ function SalesPipelineApp() {
                   )}
                   {ct.phone2 && (
                     <button
-                      style={{ ...s.btn("success"), fontSize: 11 }}
+                      style={{ ...s.btn("success"), fontSize: 11, padding: "4px 8px" }}
                       onClick={() => {
                         setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone2, result: "", notes: "", date: new Date().toISOString() });
                         setShowCallPanel(true);
@@ -2461,14 +2455,14 @@ function SalesPipelineApp() {
                       📞 {ct.phone2}
                     </button>
                   )}
-                  {ct.email && <span style={{ fontSize: 11, color: colors.yellow }}>✉️ {ct.email}</span>}
                 </div>
-                {profile && (
-                  <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {profile.communication && <Badge color={colors.accent} bg={colors.accentDim}>{profile.communication}</Badge>}
-                    {profile.decisionAuth && <Badge color={colors.purple} bg="#2d1a4e">{profile.decisionAuth}</Badge>}
-                  </div>
-                )}
+                {/* Öncelik */}
+                <select style={{ ...s.select, fontSize: 10, padding: "2px 6px", width: 40 }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
+                  <option value="">—</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
               </div>
             );
           })}
