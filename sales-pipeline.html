@@ -178,6 +178,7 @@ const colors = {
   red: "#ef4444",
   redDim: "#3d0a0a",
   orange: "#f97316",
+  orangeDim: "#3d1e08",
   purple: "#a855f7",
 };
 
@@ -264,12 +265,13 @@ const PipelineBadge = ({ stage }) => {
 };
 
 const DeviceBadge = ({ status, brand }) => {
-  const truncate = (text, max = 10) => text && text.length > max ? text.slice(0, max) + "…" : text;
-  if (!status || status === "unknown") return <Badge color={colors.textDim} bg={colors.surfaceHover} title="Bilinmiyor">❓</Badge>;
-  if (status === "none") return <Badge color={colors.green} bg={colors.greenDim} title="Cihaz Yok">✓ Yok</Badge>;
-  if (status === "ours") return <Badge color={colors.accent} bg={colors.accentDim} title="Bizde">🏠</Badge>;
-  const fullBrand = brand || "Cihaz Var";
-  return <Badge color={colors.red} bg={colors.redDim} title={fullBrand}>{truncate(fullBrand)}</Badge>;
+  const truncate = (text, max = 12) => text && text.length > max ? text.slice(0, max) + "…" : text;
+  if (!status || status === "unknown") return <Badge color={colors.textDim} bg={colors.surfaceHover} title="Bilinmiyor">❓ Bilinmiyor</Badge>;
+  if (status === "none") return <Badge color={colors.green} bg={colors.greenDim} title="Cihaz Yok">✅ Cihaz Yok</Badge>;
+  if (status === "ours") return <Badge color={colors.accent} bg={colors.accentDim} title="Bizde">🏠 Bizde</Badge>;
+  // Competitor - show brand name if known, otherwise "Cihaz Var"
+  if (brand) return <Badge color={colors.red} bg={colors.redDim} title={brand}>🔴 {truncate(brand)}</Badge>;
+  return <Badge color={colors.orange} bg={colors.orangeDim} title="Cihaz Var">⚠️ Cihaz Var</Badge>;
 };
 
 // ============================================================
