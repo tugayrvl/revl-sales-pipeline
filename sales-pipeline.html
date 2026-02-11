@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0a0e17; overflow: hidden; }
+body { background: #0a0e17; overflow: auto; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #111827; }
 ::-webkit-scrollbar-thumb { background: #2a3a50; border-radius: 3px; }
@@ -1283,16 +1283,16 @@ function SalesPipelineApp() {
 
         {/* Table */}
         <div style={{ overflowX: "auto" }}>
-          <table style={s.table}>
+          <table style={{ ...s.table, tableLayout: "fixed", width: "100%" }}>
             <thead>
               <tr>
-                <th style={s.th}>Firma</th>
-                <th style={s.th}>Çatı</th>
-                <th style={s.th}>Cihaz</th>
-                <th style={s.th}>Pipeline</th>
-                <th style={s.th}>Kontakt</th>
-                <th style={s.th}>Hafta</th>
-                <th style={s.th}>Hedef Ata</th>
+                <th style={{ ...s.th, width: "20%" }}>Firma</th>
+                <th style={{ ...s.th, width: "15%" }}>Çatı</th>
+                <th style={{ ...s.th, width: "12%" }}>Cihaz</th>
+                <th style={{ ...s.th, width: "12%" }}>Pipeline</th>
+                <th style={{ ...s.th, width: "12%" }}>Kontakt</th>
+                <th style={{ ...s.th, width: "10%" }}>Hafta</th>
+                <th style={{ ...s.th, width: "12%" }}>Hedef Ata</th>
               </tr>
             </thead>
             <tbody>
