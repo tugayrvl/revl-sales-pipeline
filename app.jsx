@@ -1,0 +1,1761 @@
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import * as SheetJS from "sheetjs";
+
+// XLSX parsing
+const parseXLSXFile = (arrayBuffer) => {
+  const data = new Uint8Array(arrayBuffer);
+  const workbook = SheetJS.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const json = SheetJS.utils.sheet_to_json(sheet, { defval: '' });
+  const headers = json.length > 0 ? Object.keys(json[0]) : [];
+  return { headers, rows: json };
+};
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+const turkishLower = (s) => {
+  if (!s) return "";
+  return s.replace(/İ/g, "i").replace(/I/g, "ı").replace(/Ş/g, "ş").replace(/Ğ/g, "ğ").replace(/Ü/g, "ü").replace(/Ö/g, "ö").replace(/Ç/g, "ç").toLowerCase();
+};
+
+const turkishUpper = (s) => {
+  if (!s) return "";
+  return s.replace(/i/g, "İ").replace(/ı/g, "I").replace(/ş/g, "Ş").replace(/ğ/g, "Ğ").replace(/ü/g, "Ü").replace(/ö/g, "Ö").replace(/ç/g, "Ç").toUpperCase();
+};
+
+const levenshtein = (a, b) => {
+  const al = turkishLower(a), bl = turkishLower(b);
+  const m = al.length, n = bl.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = al[i-1] === bl[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+};
+
+const similarity = (a, b) => {
+  if (!a || !b) return 0;
+  const al = turkishLower(a.trim()), bl = turkishLower(b.trim());
+  if (al === bl) return 1;
+  if (al.includes(bl) || bl.includes(al)) return 0.85;
+  const maxLen = Math.max(al.length, bl.length);
+  return maxLen === 0 ? 1 : 1 - levenshtein(al, bl) / maxLen;
+};
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const getWeekNumber = (d = new Date()) => {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+};
+const currentWeek = getWeekNumber();
+const currentYear = new Date().getFullYear();
+
+const getWeekDates = (week, year = currentYear) => {
+  const jan1 = new Date(year, 0, 1);
+  const days = (week - 1) * 7;
+  const dayOfWeek = jan1.getDay() || 7; // Monday = 1
+  const monday = new Date(year, 0, 1 + days - dayOfWeek + 1);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (d) => `${d.getDate()} ${["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"][d.getMonth()]}`;
+  return { monday, sunday, label: `${fmt(monday)} – ${fmt(sunday)}` };
+};
+
+// ============================================================
+// DATA STORE (localStorage-backed, Supabase-ready)
+// ============================================================
+
+const STORAGE_KEY = "sales_pipeline_data";
+
+const defaultData = () => ({
+  companies: [],
+  contacts: [],
+  callLogs: [],
+  contactProfiles: [],
+  todos: [],
+  competitors: [],
+  coldMailTemplates: [],
+  coldMailSends: [],
+  linkedinOutreach: [],
+  avmVisits: [],
+  excelImports: [],
+  fuzzyBlacklist: [],
+  demoProcesses: [],
+});
+
+const loadData = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? { ...defaultData(), ...JSON.parse(raw) } : defaultData();
+  } catch { return defaultData(); }
+};
+
+const saveData = (data) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+};
+
+// ============================================================
+// ICONS (inline SVG components)
+// ============================================================
+
+const Icon = ({ d, size = 16, color = "currentColor", ...props }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d={d}/></svg>
+);
+
+const PhoneIcon = (p) => <Icon d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" {...p}/>;
+const MailIcon = (p) => <Icon d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6" {...p}/>;
+const LinkedinIcon = (p) => <Icon d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6zM2 9h4v12H2zM4 6a2 2 0 100-4 2 2 0 000 4z" {...p}/>;
+const PlusIcon = (p) => <Icon d="M12 5v14M5 12h14" {...p}/>;
+const SearchIcon = (p) => <Icon d="M11 17.25a6.25 6.25 0 110-12.5 6.25 6.25 0 010 12.5zM16 16l4.5 4.5" {...p}/>;
+const EditIcon = (p) => <Icon d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" {...p}/>;
+const TrashIcon = (p) => <Icon d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" {...p}/>;
+const ChevronDown = (p) => <Icon d="M6 9l6 6 6-6" {...p}/>;
+const ChevronRight = (p) => <Icon d="M9 18l6-6-6-6" {...p}/>;
+const UploadIcon = (p) => <Icon d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" {...p}/>;
+const CheckIcon = (p) => <Icon d="M20 6L9 17l-5-5" {...p}/>;
+const XIcon = (p) => <Icon d="M18 6L6 18M6 6l12 12" {...p}/>;
+const GlobeIcon = (p) => <Icon d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10A15.3 15.3 0 0112 2z" {...p}/>;
+const SyncIcon = (p) => <Icon d="M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" {...p}/>;
+const BuildingIcon = (p) => <Icon d="M3 21h18M3 10h18M3 7l9-4 9 4M4 10v11M20 10v11M8 14v.01M12 14v.01M16 14v.01M8 18v.01M12 18v.01M16 18v.01" {...p}/>;
+
+// ============================================================
+// STYLES
+// ============================================================
+
+const colors = {
+  bg: "#0a0e17",
+  surface: "#111827",
+  surfaceHover: "#1a2332",
+  card: "#151d2b",
+  border: "#1e293b",
+  borderLight: "#2a3a50",
+  text: "#e2e8f0",
+  textMuted: "#8896ab",
+  textDim: "#5a6a80",
+  accent: "#3b82f6",
+  accentDim: "#1e3a6e",
+  green: "#22c55e",
+  greenDim: "#0a3d1e",
+  yellow: "#eab308",
+  yellowDim: "#3d2e08",
+  red: "#ef4444",
+  redDim: "#3d0a0a",
+  orange: "#f97316",
+  purple: "#a855f7",
+};
+
+const s = {
+  app: { fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace", background: colors.bg, color: colors.text, minHeight: "100vh", fontSize: 13 },
+  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, position: "sticky", top: 0, zIndex: 100 },
+  logo: { fontSize: 16, fontWeight: 800, letterSpacing: "0.05em", color: colors.accent },
+  tabs: { display: "flex", gap: 2 },
+  tab: (active) => ({ padding: "6px 14px", cursor: "pointer", borderRadius: 6, background: active ? colors.accentDim : "transparent", color: active ? colors.accent : colors.textMuted, fontWeight: active ? 700 : 500, fontSize: 12, border: "none", transition: "all 0.15s" }),
+  main: { display: "flex", gap: 0, height: "calc(100vh - 49px)" },
+  sidebar: { width: 220, background: colors.surface, borderRight: `1px solid ${colors.border}`, padding: "12px 0", overflowY: "auto", flexShrink: 0 },
+  sideItem: (active) => ({ padding: "8px 16px", cursor: "pointer", background: active ? colors.accentDim : "transparent", color: active ? colors.accent : colors.textMuted, fontSize: 12, fontWeight: active ? 600 : 400, borderLeft: active ? `3px solid ${colors.accent}` : "3px solid transparent", display: "flex", alignItems: "center", gap: 8 }),
+  content: { flex: 1, overflowY: "auto", padding: 20 },
+  card: { background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 16, marginBottom: 12 },
+  statCard: (color) => ({ background: colors.card, border: `1px solid ${colors.border}`, borderRadius: 8, padding: "14px 18px", minWidth: 140, borderLeft: `3px solid ${color}` }),
+  badge: (color, bg) => ({ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, color, background: bg, whiteSpace: "nowrap" }),
+  btn: (variant = "default") => ({
+    padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+    ...(variant === "primary" ? { background: colors.accent, color: "#fff" } :
+      variant === "danger" ? { background: colors.redDim, color: colors.red } :
+      variant === "success" ? { background: colors.greenDim, color: colors.green } :
+      { background: colors.surfaceHover, color: colors.textMuted, border: `1px solid ${colors.border}` })
+  }),
+  input: { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "6px 10px", color: colors.text, fontSize: 12, fontFamily: "inherit", outline: "none", width: "100%" },
+  select: { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 6, padding: "6px 10px", color: colors.text, fontSize: 12, fontFamily: "inherit", outline: "none" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  th: { textAlign: "left", padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, color: colors.textMuted, fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" },
+  td: { padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, verticalAlign: "top" },
+  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, backdropFilter: "blur(4px)" },
+  modalContent: { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12, padding: 24, maxWidth: 600, width: "90%", maxHeight: "80vh", overflowY: "auto" },
+  syncBar: (visible) => ({ position: "fixed", bottom: 16, right: 16, background: colors.greenDim, border: `1px solid ${colors.green}`, borderRadius: 8, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: colors.green, opacity: visible ? 1 : 0, transition: "opacity 0.3s", pointerEvents: visible ? "auto" : "none", zIndex: 300 }),
+};
+
+// ============================================================
+// COMPONENTS
+// ============================================================
+
+const StatCard = ({ label, value, color = colors.accent, sub }) => (
+  <div style={s.statCard(color)}>
+    <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+    <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{label}</div>
+    {sub && <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2 }}>{sub}</div>}
+  </div>
+);
+
+const Badge = ({ children, color = colors.accent, bg = colors.accentDim }) => (
+  <span style={s.badge(color, bg)}>{children}</span>
+);
+
+const ContactStatusBadge = ({ contact }) => {
+  const hasPhone = !!contact.phone;
+  const hasEmail = !!contact.email;
+  const hasLinkedin = !!contact.linkedin;
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {hasPhone && <Badge color={colors.green} bg={colors.greenDim}>📞</Badge>}
+      {hasEmail && <Badge color={colors.yellow} bg={colors.yellowDim}>✉️</Badge>}
+      {hasLinkedin && <Badge color={colors.accent} bg={colors.accentDim}>in</Badge>}
+      {!hasPhone && !hasEmail && !hasLinkedin && <Badge color={colors.red} bg={colors.redDim}>Eksik</Badge>}
+    </div>
+  );
+};
+
+const PipelineBadge = ({ stage }) => {
+  const map = {
+    new_target: { label: "Yeni Hedef", color: colors.textMuted, bg: colors.surfaceHover },
+    searching_contact: { label: "Kontakt Aranıyor", color: colors.yellow, bg: colors.yellowDim },
+    contact_ready: { label: "Kontakt Hazır", color: colors.green, bg: colors.greenDim },
+    called: { label: "Arama Yapıldı", color: colors.accent, bg: colors.accentDim },
+    meeting_scheduled: { label: "Toplantı Alındı", color: colors.purple, bg: "#2d1a4e" },
+    demo_done: { label: "Demo Yapıldı", color: colors.orange, bg: "#3d1e08" },
+    regular_followup: { label: "Düzenli Takip", color: colors.yellow, bg: colors.yellowDim },
+    unreached: { label: "Ulaşılamadı", color: colors.red, bg: colors.redDim },
+    not_interested: { label: "İlgilenmiyor", color: colors.textDim, bg: colors.surfaceHover },
+    closing: { label: "Kapanış Süreci", color: colors.green, bg: colors.greenDim },
+    completed: { label: "Tamamlandı", color: colors.green, bg: colors.greenDim },
+  };
+  const m = map[stage] || { label: stage || "—", color: colors.textMuted, bg: colors.surfaceHover };
+  return <Badge color={m.color} bg={m.bg}>{m.label}</Badge>;
+};
+
+const DeviceBadge = ({ status, brand }) => {
+  if (!status || status === "unknown") return <Badge color={colors.textDim} bg={colors.surfaceHover}>❓ Bilinmiyor</Badge>;
+  if (status === "none") return <Badge color={colors.green} bg={colors.greenDim}>Cihaz Yok ✓</Badge>;
+  if (status === "ours") return <Badge color={colors.accent} bg={colors.accentDim}>🏠 Bizde</Badge>;
+  return <Badge color={colors.red} bg={colors.redDim}>{brand || "Cihaz Var"}</Badge>;
+};
+
+// ============================================================
+// EXCEL PARSER (TSV/CSV with preview)
+// ============================================================
+
+const parseExcel = (text, separator = "\t") => {
+  const lines = text.trim().split("\n");
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const headers = lines[0].split(separator).map(h => h.trim());
+  const rows = lines.slice(1).map(line => {
+    const vals = line.split(separator);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (vals[i] || "").trim(); });
+    return obj;
+  });
+  return { headers, rows };
+};
+
+// ============================================================
+// MAIN APP
+// ============================================================
+
+export default function SalesPipelineApp() {
+  const [data, setData] = useState(loadData);
+  const [activeTab, setActiveTab] = useState("weekly");
+  const [selectedWeek, setSelectedWeek] = useState(currentWeek);
+  const [expandedFirm, setExpandedFirm] = useState(null);
+  const [showModal, setShowModal] = useState(null);
+  const [modalData, setModalData] = useState({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [syncNotif, setSyncNotif] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [fuzzyMatches, setFuzzyMatches] = useState([]);
+  const [callResult, setCallResult] = useState(null);
+  const fileInputRef = useRef(null);
+  const fileInputAvmRef = useRef(null);
+  const [importType, setImportType] = useState("lusha");
+  const [weekFilter, setWeekFilter] = useState("all"); // "all" | "ready" | "no_contact" | "followup"
+  const [companyFilter, setCompanyFilter] = useState({ device: "all", phone: "all", assigned: "all" }); // device: all|none|competitor, phone: all|has_phone|no_phone, assigned: all|unassigned|assigned
+  const [targetWeekPicker, setTargetWeekPicker] = useState(null); // { companyId, show }
+  const [assignWeek, setAssignWeek] = useState(currentWeek);
+
+  // Auto-save
+  useEffect(() => { saveData(data); }, [data]);
+
+  const showSync = useCallback((msg) => {
+    setSyncNotif(msg || "Kaydedildi ✓");
+    setTimeout(() => setSyncNotif(false), 2000);
+  }, []);
+
+  const updateData = useCallback((fn) => {
+    setData(prev => {
+      const next = fn(prev);
+      return { ...next };
+    });
+    showSync("Senkronize edildi ✓");
+  }, [showSync]);
+
+  // ---- DERIVED DATA ----
+  const weekCompanies = useMemo(() =>
+    data.companies.filter(c => c.targetWeek === selectedWeek && c.targetYear === currentYear),
+    [data.companies, selectedWeek]
+  );
+
+  const followupCompanies = useMemo(() =>
+    data.companies.filter(c => c.pipeline === "regular_followup" && c.followupWeek === selectedWeek && c.followupYear === currentYear),
+    [data.companies, selectedWeek]
+  );
+
+  // Also include followups that don't have a specific week assigned but are active
+  const allFollowups = useMemo(() =>
+    data.companies.filter(c => c.pipeline === "regular_followup"),
+    [data.companies]
+  );
+
+  const getContacts = useCallback((companyId) =>
+    data.contacts.filter(c => c.companyId === companyId).sort((a, b) => (a.priority || 99) - (b.priority || 99)),
+    [data.contacts]
+  );
+
+  const getParentCompany = useCallback((companyId) => {
+    const company = data.companies.find(c => c.id === companyId);
+    if (company?.parentId) return data.companies.find(c => c.id === company.parentId);
+    return null;
+  }, [data.companies]);
+
+  const getChildCompanies = useCallback((companyId) =>
+    data.companies.filter(c => c.parentId === companyId),
+    [data.companies]
+  );
+
+  const getCallLogs = useCallback((companyId) =>
+    data.callLogs.filter(c => c.companyId === companyId).sort((a, b) => new Date(b.date) - new Date(a.date)),
+    [data.callLogs]
+  );
+
+  const getProfile = useCallback((contactId) =>
+    data.contactProfiles.find(p => p.contactId === contactId),
+    [data.contactProfiles]
+  );
+
+  // Stats
+  const stats = useMemo(() => {
+    const cs = data.companies;
+    const cts = data.contacts;
+    const wk = weekCompanies;
+    const wkIds = new Set(wk.map(c => c.id));
+    const wkContacts = cts.filter(c => wkIds.has(c.companyId));
+    return {
+      totalCompanies: cs.length,
+      noDevice: cs.filter(c => c.deviceStatus === "none").length,
+      hasDevice: cs.filter(c => c.deviceStatus === "competitor").length,
+      unknownDevice: cs.filter(c => !c.deviceStatus || c.deviceStatus === "unknown").length,
+      totalContacts: cts.length,
+      withPhone: cts.filter(c => c.phone).length,
+      withEmail: cts.filter(c => c.email).length,
+      onlyLinkedin: cts.filter(c => c.linkedin && !c.phone && !c.email).length,
+      parentCompanies: cs.filter(c => c.isParent).length,
+      weekTargets: wk.length,
+      weekReady: wk.filter(f => wkContacts.some(c => c.companyId === f.id && c.phone)).length,
+      weekNoContact: wk.filter(f => !wkContacts.some(c => c.companyId === f.id)).length,
+      weekCalls: data.callLogs.filter(l => l.week === selectedWeek && l.year === currentYear).length,
+      weekMeetings: data.callLogs.filter(l => l.week === selectedWeek && l.year === currentYear && l.result === "meeting").length,
+      weekFollowups: allFollowups.length,
+    };
+  }, [data, weekCompanies, selectedWeek]);
+
+  // ---- FIRM SORTING (for weekly view) ----
+  const sortedWeekCompanies = useMemo(() => {
+    return [...weekCompanies].sort((a, b) => {
+      const aContacts = getContacts(a.id);
+      const bContacts = getContacts(b.id);
+      const aHasPhone = aContacts.some(c => c.phone);
+      const bHasPhone = bContacts.some(c => c.phone);
+      const aHasAny = aContacts.length > 0;
+      const bHasAny = bContacts.length > 0;
+      if (aHasPhone && !bHasPhone) return -1;
+      if (!aHasPhone && bHasPhone) return 1;
+      if (aHasAny && !bHasAny) return -1;
+      if (!aHasAny && bHasAny) return 1;
+      return turkishLower(a.name).localeCompare(turkishLower(b.name), "tr");
+    });
+  }, [weekCompanies, getContacts]);
+
+  // ---- IMPORT HANDLERS ----
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    const allRows = [];
+    let headers = [];
+    let processed = 0;
+
+    const checkDone = () => {
+      processed++;
+      if (processed === files.length) {
+        setImportPreview({ headers, rows: allRows, fileCount: files.length });
+      }
+    };
+
+    files.forEach(file => {
+      const isXlsx = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+
+      if (isXlsx) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const result = parseXLSXFile(ev.target.result);
+            if (result.headers.length > headers.length) headers = result.headers;
+            allRows.push(...result.rows);
+          } catch (err) {
+            console.error("XLSX parse error:", err);
+            alert("XLSX okuma hatası: " + err.message);
+          }
+          checkDone();
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const text = ev.target.result;
+            const sep = text.includes("\t") ? "\t" : ",";
+            const parsed = parseExcel(text, sep);
+            if (parsed.headers.length > headers.length) headers = parsed.headers;
+            allRows.push(...parsed.rows);
+          } catch (err) {
+            console.error("CSV parse error:", err);
+            alert("CSV okuma hatası: " + err.message);
+          }
+          checkDone();
+        };
+        reader.readAsText(file, "UTF-8");
+      }
+    });
+
+    e.target.value = "";
+  };
+
+  const processLushaImport = (parsed) => {
+    const { rows } = parsed;
+    let newContacts = 0, updatedContacts = 0, newCompanies = 0, firmOnlyRows = 0;
+
+    const findCol = (row, ...names) => {
+      for (const name of names) {
+        // Handle BOM prefix
+        const bomName = "\ufeff" + name;
+        if (row[bomName] !== undefined && row[bomName] !== null && row[bomName] !== "") return String(row[bomName]);
+        if (row[name] !== undefined && row[name] !== null && row[name] !== "") return String(row[name]);
+        const key = Object.keys(row).find(k => {
+          const clean = k.replace(/^\ufeff/, "");
+          return turkishLower(clean) === turkishLower(name) || turkishLower(clean).includes(turkishLower(name));
+        });
+        if (key && row[key] !== undefined && row[key] !== null && row[key] !== "") return String(row[key]);
+      }
+      return "";
+    };
+
+    updateData(prev => {
+      const next = { ...prev, contacts: [...prev.contacts], companies: [...prev.companies] };
+
+      rows.forEach(row => {
+        // Build full name
+        const fullName = findCol(row, "Full Name", "Name", "İsim", "Ad Soyad");
+        const firstName = findCol(row, "First Name", "Ad");
+        const lastName = findCol(row, "Last Name", "Soyad");
+        const name = fullName || `${firstName} ${lastName}`.trim();
+
+        // Company
+        const company = findCol(row, "Company Name", "Company", "Firma", "Şirket");
+
+        // If neither name nor company, truly empty row — skip
+        if (!name && !company) return;
+
+        // Contact details
+        const title = findCol(row, "Job Title", "Title", "Ünvan", "Pozisyon");
+        const seniority = findCol(row, "Seniority");
+
+        // Phones — both Phone 1 and Phone 2, ignore Type columns
+        const phone1 = findCol(row, "Phone 1");
+        const phone2 = findCol(row, "Phone 2");
+        const phoneGeneric = findCol(row, "Phone", "Telefon", "Direct Phone", "Mobile Phone", "Cep", "Tel");
+        const phone = phone1 || phoneGeneric;
+
+        // Email — Work Email priority, then others
+        const workEmail = findCol(row, "Work Email");
+        const directEmail = findCol(row, "Direct Email");
+        const additionalEmail = findCol(row, "Additional Email 1");
+        const genericEmail = findCol(row, "Email", "E-posta", "Mail");
+        const email = workEmail || directEmail || genericEmail || additionalEmail;
+
+        // LinkedIn — person's LinkedIn URL
+        const linkedin = findCol(row, "LinkedIn URL");
+
+        // Company details from Lusha
+        const companyWebsite = findCol(row, "Company Website");
+        const companyLinkedin = findCol(row, "Company linkedin URL", "Company LinkedIn URL");
+        const companyDomain = findCol(row, "Company Domain");
+
+        // Check if this is a "new firm only" row (from combined excel)
+        const isNewFirmaOnly = row["_yeniFirma"] === true || row["_yeniFirma"] === "true" || row["_yeniFirma"] === "TRUE";
+
+        // Find or create company
+        let comp = company ? next.companies.find(c => similarity(c.name, company) > 0.8) : null;
+        if (!comp && company) {
+          comp = {
+            id: uid(), name: company,
+            deviceStatus: "unknown", deviceBrand: "",
+            pipeline: "new_target",
+            targetWeek: null, targetYear: null,
+            parentId: null, isParent: false,
+            linkedin: companyLinkedin || "",
+            website: companyWebsite || companyDomain || "",
+            notes: "",
+            createdAt: new Date().toISOString()
+          };
+          next.companies.push(comp);
+          newCompanies++;
+        } else if (comp) {
+          // Update company with Lusha data if missing
+          if (companyLinkedin && !comp.linkedin) comp.linkedin = companyLinkedin;
+          if ((companyWebsite || companyDomain) && !comp.website) comp.website = companyWebsite || companyDomain;
+        }
+
+        if (!comp) return;
+
+        // If no name, this is a company-only row — firm created above, done
+        if (!name) { firmOnlyRows++; return; }
+
+        // Find existing contact by name + company
+        const existing = next.contacts.find(c =>
+          c.companyId === comp.id && similarity(c.name, name) > 0.85
+        );
+
+        if (existing) {
+          let updated = false;
+          if (phone && !existing.phone) { existing.phone = phone; updated = true; }
+          if (phone2 && !existing.phone2) { existing.phone2 = phone2; updated = true; }
+          if (email && !existing.email) { existing.email = email; updated = true; }
+          if (linkedin && !existing.linkedin) { existing.linkedin = linkedin; updated = true; }
+          if (title && !existing.title) { existing.title = title; updated = true; }
+          if (seniority && !existing.seniority) { existing.seniority = seniority; updated = true; }
+          if (updated) updatedContacts++;
+        } else {
+          next.contacts.push({
+            id: uid(), name, title, seniority: seniority || "",
+            phone, phone2: phone2 || "", email, linkedin,
+            companyId: comp.id, source: "lusha", status: "active",
+            priority: next.contacts.filter(c => c.companyId === comp.id).length + 1,
+            createdAt: new Date().toISOString()
+          });
+          newContacts++;
+        }
+
+        // Update company pipeline if contact has phone
+        if (phone && comp.pipeline === "new_target") {
+          comp.pipeline = "contact_ready";
+        } else if ((email || linkedin) && comp.pipeline === "new_target") {
+          comp.pipeline = "searching_contact";
+        }
+      });
+
+      return next;
+    });
+
+    setImportPreview(null);
+    alert(`Lusha import tamamlandı!\n${newCompanies} yeni firma\n${newContacts} yeni kontakt\n${updatedContacts} güncellenen kontakt${firmOnlyRows > 0 ? `\n${firmOnlyRows} sadece firma (kontaktsız)` : ""}\nToplam ${rows.length} satır işlendi`);
+  };
+
+  const processAVMImport = (parsed) => {
+    const { rows, headers } = parsed;
+    let newCompanies = 0, updatedCompanies = 0;
+
+    const findCol = (row, ...names) => {
+      for (const name of names) {
+        if (row[name] !== undefined && row[name] !== null && row[name] !== "") return String(row[name]);
+        const key = Object.keys(row).find(k => turkishLower(k).includes(turkishLower(name)));
+        if (key && row[key] !== undefined && row[key] !== null && row[key] !== "") return String(row[key]);
+      }
+      return "";
+    };
+
+    // Determine if "boş" means no device
+    const isNoDevice = (val) => {
+      if (!val) return false; // empty cell = unknown
+      const v = turkishLower(val.trim());
+      return v === "boş" || v.startsWith("boş ") || v.startsWith("boş-") || v.startsWith("boş,") ||
+             v === "yok" || v === "görülmedi" || v.startsWith("görülmedi") ||
+             v === "yeni sökülmüş boş" || v.includes("boş gibi");
+    };
+
+    const isOurDevice = (val) => {
+      if (!val) return false;
+      const v = turkishLower(val.trim());
+      return v === "biz" || v === "bizde" || v.startsWith("biz ") || v.startsWith("bizde ");
+    };
+
+    updateData(prev => {
+      const next = { ...prev, companies: [...prev.companies] };
+      let lastAvm = "";
+
+      rows.forEach(row => {
+        // AVM fill-down: if AVM cell is empty, use the last known AVM
+        const avmVal = findCol(row, "AVM");
+        if (avmVal) lastAvm = avmVal.trim();
+
+        const name = findCol(row, "Firma", "Firma Adı", "Mağaza", "Brand", "Marka");
+        const device = findCol(row, "Cihaz", "Cihaz Durumu");
+        const photo = findCol(row, "REFERANS FOTO", "Fotoğraf", "Foto");
+        const tarih = findCol(row, "Tarih");
+
+        if (!name || name.trim().length < 2) return;
+
+        const nameTrimmed = name.trim();
+        const deviceTrimmed = device.trim();
+        const deviceLower = turkishLower(deviceTrimmed);
+
+        let deviceStatus, deviceBrand;
+        if (!deviceTrimmed) {
+          // Empty cell — we don't know
+          deviceStatus = "unknown";
+          deviceBrand = "";
+        } else if (isNoDevice(deviceTrimmed)) {
+          deviceStatus = "none";
+          deviceBrand = "";
+        } else if (isOurDevice(deviceTrimmed)) {
+          deviceStatus = "ours";
+          deviceBrand = "RemVision";
+        } else {
+          deviceStatus = "competitor";
+          deviceBrand = deviceTrimmed;
+        }
+
+        let comp = next.companies.find(c => similarity(c.name, nameTrimmed) > 0.75);
+        if (!comp) {
+          comp = {
+            id: uid(), name: nameTrimmed,
+            deviceStatus, deviceBrand,
+            pipeline: "new_target",
+            targetWeek: null, targetYear: null,
+            parentId: null, isParent: false,
+            linkedin: "", website: "",
+            avm: lastAvm,
+            photo: photo || "",
+            visitDate: tarih || "",
+            notes: "",
+            createdAt: new Date().toISOString()
+          };
+          next.companies.push(comp);
+          newCompanies++;
+        } else {
+          // Update existing company with AVM data
+          if (deviceStatus !== "unknown") {
+            comp.deviceStatus = deviceStatus;
+            comp.deviceBrand = deviceBrand;
+          }
+          if (lastAvm && !comp.avm) comp.avm = lastAvm;
+          if (photo && !comp.photo) comp.photo = photo;
+          if (tarih && !comp.visitDate) comp.visitDate = tarih;
+          updatedCompanies++;
+        }
+      });
+
+      return next;
+    });
+
+    setImportPreview(null);
+    alert(`AVM import tamamlandı!\n${newCompanies} yeni firma\n${updatedCompanies} güncellenen firma\nToplam ${rows.length} satır işlendi`);
+  };
+
+  // ---- MODAL HANDLERS ----
+  const openAddCompany = () => {
+    setModalData({ name: "", deviceStatus: "unknown", deviceBrand: "", pipeline: "new_target", targetWeek: selectedWeek, linkedin: "", website: "", notes: "", isParent: false, parentId: "" });
+    setShowModal("addCompany");
+  };
+
+  const saveCompany = () => {
+    updateData(prev => ({
+      ...prev,
+      companies: [...prev.companies, { ...modalData, id: uid(), targetYear: currentYear, createdAt: new Date().toISOString() }]
+    }));
+    setShowModal(null);
+  };
+
+  const openAddContact = (companyId) => {
+    setModalData({ name: "", title: "", phone: "", email: "", linkedin: "", companyId, source: "manual" });
+    setShowModal("addContact");
+  };
+
+  const saveContact = () => {
+    updateData(prev => ({
+      ...prev,
+      contacts: [...prev.contacts, { ...modalData, id: uid(), status: "active", priority: prev.contacts.filter(c => c.companyId === modalData.companyId).length + 1, createdAt: new Date().toISOString() }]
+    }));
+    setShowModal(null);
+  };
+
+  const deleteContact = (contactId) => {
+    updateData(prev => ({
+      ...prev,
+      contacts: prev.contacts.filter(c => c.id !== contactId)
+    }));
+  };
+
+  const openCallLog = (company, contact) => {
+    setCallResult({ companyId: company.id, contactId: contact.id, contactName: contact.name, companyName: company.name, result: "", notes: "", meetingDate: "", date: new Date().toISOString(), week: selectedWeek, year: currentYear });
+    setShowModal("callLog");
+  };
+
+  const saveCallLog = () => {
+    updateData(prev => {
+      const next = { ...prev, callLogs: [...prev.callLogs, { ...callResult, id: uid() }] };
+      // Update pipeline
+      const comp = next.companies.find(c => c.id === callResult.companyId);
+      if (comp) {
+        if (callResult.result === "meeting") comp.pipeline = "meeting_scheduled";
+        else if (callResult.result === "introduced") comp.pipeline = "regular_followup";
+        else if (callResult.result === "unreached") comp.pipeline = "unreached";
+        else if (callResult.result === "not_interested") comp.pipeline = "not_interested";
+      }
+      return next;
+    });
+    // Show character profile after call
+    setShowModal("charProfile");
+  };
+
+  const [charProfile, setCharProfile] = useState({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", pricesSensitivity: "", urgency: "", personalNotes: "" });
+
+  const saveCharProfile = () => {
+    updateData(prev => {
+      const existing = prev.contactProfiles.findIndex(p => p.contactId === callResult.contactId);
+      const profiles = [...prev.contactProfiles];
+      const profile = { ...charProfile, contactId: callResult.contactId, updatedAt: new Date().toISOString() };
+      if (existing >= 0) profiles[existing] = { ...profiles[existing], ...profile };
+      else profiles.push({ ...profile, id: uid() });
+      return { ...prev, contactProfiles: profiles };
+    });
+    setShowModal(null);
+    setCallResult(null);
+    setCharProfile({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", pricesSensitivity: "", urgency: "", personalNotes: "" });
+  };
+
+  const updateCompanyField = (companyId, field, value) => {
+    updateData(prev => ({
+      ...prev,
+      companies: prev.companies.map(c => c.id === companyId ? { ...c, [field]: value } : c)
+    }));
+  };
+
+  const updateContactField = (contactId, field, value) => {
+    updateData(prev => ({
+      ...prev,
+      contacts: prev.contacts.map(c => c.id === contactId ? { ...c, [field]: value } : c)
+    }));
+  };
+
+  // ---- SEARCH / FILTER ----
+  const filteredCompanies = useMemo(() => {
+    let result = data.companies;
+
+    // Text search
+    if (searchTerm) {
+      const term = turkishLower(searchTerm);
+      result = result.filter(c => turkishLower(c.name).includes(term));
+    }
+
+    // Device filter
+    if (companyFilter.device === "none") result = result.filter(c => c.deviceStatus === "none");
+    else if (companyFilter.device === "competitor") result = result.filter(c => c.deviceStatus === "competitor");
+    else if (companyFilter.device === "unknown") result = result.filter(c => !c.deviceStatus || c.deviceStatus === "unknown");
+    else if (companyFilter.device === "ours") result = result.filter(c => c.deviceStatus === "ours");
+
+    // Phone filter
+    if (companyFilter.phone === "has_phone") {
+      result = result.filter(c => data.contacts.some(ct => ct.companyId === c.id && ct.phone));
+    } else if (companyFilter.phone === "no_phone") {
+      result = result.filter(c => !data.contacts.some(ct => ct.companyId === c.id && ct.phone));
+    }
+
+    // Assigned filter
+    if (companyFilter.assigned === "unassigned") result = result.filter(c => !c.targetWeek);
+    else if (companyFilter.assigned === "assigned") result = result.filter(c => !!c.targetWeek);
+
+    return result;
+  }, [data.companies, data.contacts, searchTerm, companyFilter]);
+
+  // ============================================================
+  // RENDER: WEEKLY VIEW
+  // ============================================================
+
+  const weekDates = useMemo(() => getWeekDates(selectedWeek), [selectedWeek]);
+
+  // Filtered companies based on stat card selection
+  const displayCompanies = useMemo(() => {
+    const targetFirms = sortedWeekCompanies;
+
+    if (weekFilter === "ready") {
+      return targetFirms.filter(c => getContacts(c.id).some(ct => ct.phone));
+    }
+    if (weekFilter === "no_contact") {
+      return targetFirms.filter(c => {
+        const cts = getContacts(c.id);
+        return !cts.some(ct => ct.phone);
+      });
+    }
+    return targetFirms;
+  }, [sortedWeekCompanies, weekFilter, getContacts]);
+
+  // Followup companies for the interleaved call list
+  const displayFollowups = useMemo(() => {
+    return allFollowups.sort((a, b) => {
+      const aLogs = getCallLogs(a.id);
+      const bLogs = getCallLogs(b.id);
+      const aLast = aLogs.length > 0 ? new Date(aLogs[0].date) : new Date(0);
+      const bLast = bLogs.length > 0 ? new Date(bLogs[0].date) : new Date(0);
+      return aLast - bLast; // en eski aranmış olan en üstte
+    });
+  }, [allFollowups, getCallLogs]);
+
+  // Interleaved call order: 1 followup, 1 new target, 1 followup, 1 new target...
+  const callOrder = useMemo(() => {
+    const ready = displayCompanies.filter(c => getContacts(c.id).some(ct => ct.phone));
+    const followReady = displayFollowups.filter(c => getContacts(c.id).some(ct => ct.phone));
+    const result = [];
+    let ri = 0, fi = 0;
+    while (ri < ready.length || fi < followReady.length) {
+      if (fi < followReady.length) result.push({ ...followReady[fi], _type: "followup" });
+      fi++;
+      if (ri < ready.length) result.push({ ...ready[ri], _type: "target" });
+      ri++;
+    }
+    return result;
+  }, [displayCompanies, displayFollowups, getContacts]);
+
+  const renderCompanyCard = (company, type) => {
+    const contacts = getContacts(company.id);
+    const hasPhone = contacts.some(c => c.phone);
+    const hasAny = contacts.length > 0;
+    const isExpanded = expandedFirm === company.id;
+    const statusColor = hasPhone ? colors.green : hasAny ? colors.yellow : colors.red;
+    const statusDot = hasPhone ? "🟢" : hasAny ? "🟡" : "🔴";
+    const parent = getParentCompany(company.id);
+    const parentContacts = parent ? getContacts(parent.id) : [];
+    const logs = getCallLogs(company.id);
+
+    return (
+      <div key={company.id} style={{ ...s.card, borderLeft: `3px solid ${statusColor}`, cursor: "pointer" }}>
+        {/* Compact Row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={() => setExpandedFirm(isExpanded ? null : company.id)}>
+          <span style={{ fontSize: 14 }}>{statusDot}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{company.name}</span>
+              {parent && <span style={{ fontSize: 11, color: colors.textMuted }}>({parent.name})</span>}
+              <PipelineBadge stage={company.pipeline} />
+              <DeviceBadge status={company.deviceStatus} brand={company.deviceBrand} />
+                    {company.avm && <Badge color={colors.textMuted} bg={colors.surfaceHover}>📍 {company.avm}</Badge>}
+              {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
+            </div>
+            {contacts.length > 0 && (
+              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 3 }}>
+                {contacts[0].name} — {contacts[0].title} {contacts[0].phone ? `📞 ${contacts[0].phone}` : contacts[0].email ? `✉️ ${contacts[0].email}` : "🔗 LinkedIn"}
+              </div>
+            )}
+            {contacts.length === 0 && parent && parentContacts.length > 0 && (
+              <div style={{ fontSize: 11, color: colors.yellow }}>
+                → Çatı firmada {parentContacts.length} kontakt mevcut
+              </div>
+            )}
+            {contacts.length === 0 && (!parent || parentContacts.length === 0) && (
+              <div style={{ fontSize: 11, color: colors.red }}>Kontakt yok</div>
+            )}
+            {logs.length > 0 && (
+              <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2 }}>
+                Son: {logs[0].notes?.slice(0, 60) || "Not yok"} ({new Date(logs[0].date).toLocaleDateString("tr")})
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {hasPhone && <button style={s.btn("success")} onClick={(e) => { e.stopPropagation(); openCallLog(company, contacts.find(c => c.phone) || contacts[0]); }}>📞 Ara</button>}
+            {isExpanded ? <ChevronDown size={18} color={colors.textMuted}/> : <ChevronRight size={18} color={colors.textMuted}/>}
+          </div>
+        </div>
+
+        {/* Expanded Card */}
+        {isExpanded && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${colors.border}` }}>
+            {/* Quick Links */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {company.linkedin && <a href={company.linkedin} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}><LinkedinIcon size={14}/> Firma LinkedIn</a>}
+              {company.website && <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}><GlobeIcon size={14}/> Website</a>}
+              <button style={s.btn()} onClick={() => openAddContact(company.id)}><PlusIcon size={14}/> Kontakt Ekle</button>
+              <select style={s.select} value={company.pipeline} onChange={(e) => updateCompanyField(company.id, "pipeline", e.target.value)}>
+                <option value="new_target">Yeni Hedef</option>
+                <option value="searching_contact">Kontakt Aranıyor</option>
+                <option value="contact_ready">Kontakt Hazır</option>
+                <option value="called">Arama Yapıldı</option>
+                <option value="meeting_scheduled">Toplantı Alındı</option>
+                <option value="demo_done">Demo Yapıldı</option>
+                <option value="regular_followup">Düzenli Takip</option>
+                <option value="unreached">Ulaşılamadı</option>
+                <option value="not_interested">İlgilenmiyor</option>
+                <option value="closing">Kapanış</option>
+              </select>
+            </div>
+
+            {/* Editable Company Fields */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <div>
+                <label style={{ fontSize: 10, color: colors.textDim }}>LinkedIn URL</label>
+                <input style={s.input} value={company.linkedin || ""} onChange={(e) => updateCompanyField(company.id, "linkedin", e.target.value)} placeholder="Firma LinkedIn URL" />
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: colors.textDim }}>Website</label>
+                <input style={s.input} value={company.website || ""} onChange={(e) => updateCompanyField(company.id, "website", e.target.value)} placeholder="Firma website" />
+              </div>
+            </div>
+
+            {/* Contacts Table */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 6 }}>KONTAKTLAR ({contacts.length})</div>
+            {contacts.length > 0 && (
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    <th style={s.th}>#</th>
+                    <th style={s.th}>İsim</th>
+                    <th style={s.th}>Ünvan</th>
+                    <th style={s.th}>Telefon</th>
+                    <th style={s.th}>Email</th>
+                    <th style={s.th}>LinkedIn</th>
+                    <th style={s.th}>Profil</th>
+                    <th style={s.th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contacts.map((ct, idx) => {
+                    const profile = getProfile(ct.id);
+                    return (
+                      <tr key={ct.id} style={{ background: idx === 0 ? "rgba(59,130,246,0.05)" : "transparent" }}>
+                        <td style={s.td}>
+                          <span style={{ fontWeight: 700, color: idx === 0 ? colors.accent : colors.textDim }}>{idx + 1}</span>
+                        </td>
+                        <td style={s.td}>
+                          <input style={{ ...s.input, fontWeight: 600, border: "none", padding: "2px 4px", background: "transparent" }} value={ct.name} onChange={(e) => updateContactField(ct.id, "name", e.target.value)} />
+                        </td>
+                        <td style={s.td}>
+                          <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent" }} value={ct.title || ""} onChange={(e) => updateContactField(ct.id, "title", e.target.value)} />
+                        </td>
+                        <td style={s.td}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: ct.phone ? colors.green : colors.textDim }} value={ct.phone || ""} onChange={(e) => updateContactField(ct.id, "phone", e.target.value)} placeholder="—" />
+                            {ct.phone && <button style={{ ...s.btn("success"), padding: "3px 8px" }} onClick={(e) => { e.stopPropagation(); openCallLog(company, ct); }}>📞</button>}
+                          </div>
+                        </td>
+                        <td style={s.td}>
+                          <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: ct.email ? colors.yellow : colors.textDim }} value={ct.email || ""} onChange={(e) => updateContactField(ct.id, "email", e.target.value)} placeholder="—" />
+                        </td>
+                        <td style={s.td}>
+                          {ct.linkedin ? (
+                            <a href={ct.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, fontSize: 11 }}>Profil ↗</a>
+                          ) : (
+                            <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: colors.textDim }} value="" onChange={(e) => updateContactField(ct.id, "linkedin", e.target.value)} placeholder="URL ekle" />
+                          )}
+                        </td>
+                        <td style={s.td}>
+                          {profile ? (
+                            <span style={{ fontSize: 10, color: colors.green }}>✓ {profile.communication || ""}</span>
+                          ) : (
+                            <span style={{ fontSize: 10, color: colors.textDim }}>—</span>
+                          )}
+                        </td>
+                        <td style={s.td}>
+                          <button style={{ ...s.btn("danger"), padding: "3px 6px" }} onClick={() => deleteContact(ct.id)}><TrashIcon size={12}/></button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {/* Parent company contacts */}
+            {contacts.length === 0 && parent && parentContacts.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: colors.yellow, marginBottom: 6 }}>Çatı firma kontaktları ({parent.name}):</div>
+                {parentContacts.map(ct => (
+                  <div key={ct.id} style={{ fontSize: 11, padding: "4px 0", color: colors.textMuted }}>
+                    {ct.name} — {ct.title} {ct.phone && `📞 ${ct.phone}`} {ct.email && `✉️`} {ct.linkedin && "🔗"}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Notes */}
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: 10, color: colors.textDim }}>Notlar</label>
+              <textarea style={{ ...s.input, height: 50, resize: "vertical" }} value={company.notes || ""} onChange={(e) => updateCompanyField(company.id, "notes", e.target.value)} placeholder="Firma notları..." />
+            </div>
+
+            {/* Call History */}
+            {logs.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 6 }}>ARAMA GEÇMİŞİ</div>
+                {logs.slice(0, 5).map(log => (
+                  <div key={log.id} style={{ fontSize: 11, padding: "4px 0", borderBottom: `1px solid ${colors.border}`, display: "flex", gap: 8 }}>
+                    <span style={{ color: colors.textDim, minWidth: 70 }}>{new Date(log.date).toLocaleDateString("tr")}</span>
+                    <Badge color={log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red} bg={log.result === "meeting" ? colors.greenDim : log.result === "introduced" ? colors.yellowDim : colors.redDim}>
+                      {log.result === "meeting" ? "Toplantı" : log.result === "introduced" ? "Tanışıldı" : log.result === "unreached" ? "Ulaşılamadı" : log.result === "not_interested" ? "İlgilenmiyor" : log.result}
+                    </Badge>
+                    <span style={{ color: colors.textMuted }}>{log.notes}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderWeeklyView = () => (
+    <div>
+      {/* Week Selector with Date Range */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <button style={s.btn()} onClick={() => { setSelectedWeek(w => Math.max(1, w - 1)); setWeekFilter("all"); }}>◀</button>
+        <div>
+          <span style={{ fontSize: 16, fontWeight: 700 }}>Hafta {selectedWeek}</span>
+          <span style={{ fontSize: 12, color: colors.textMuted, marginLeft: 8 }}>{weekDates.label}, {currentYear}</span>
+        </div>
+        <button style={s.btn()} onClick={() => { setSelectedWeek(w => Math.min(53, w + 1)); setWeekFilter("all"); }}>▶</button>
+        {selectedWeek !== currentWeek && <button style={s.btn("primary")} onClick={() => { setSelectedWeek(currentWeek); setWeekFilter("all"); }}>Bu Hafta</button>}
+      </div>
+
+      {/* Clickable Stats Row */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        {[
+          { key: "all", label: "Hedef Firma", value: stats.weekTargets, color: colors.accent },
+          { key: "ready", label: "Aramaya Hazır", value: stats.weekReady, color: colors.green },
+          { key: "no_contact", label: "Kontakt Eksik", value: stats.weekNoContact, color: colors.red },
+          { key: "calls", label: "Yapılan Arama", value: stats.weekCalls, color: colors.yellow },
+          { key: "meetings", label: "Toplantı Alınan", value: stats.weekMeetings, color: colors.purple },
+          { key: "followup", label: "Düzenli Takip", value: stats.weekFollowups, color: colors.orange },
+        ].map(st => (
+          <div
+            key={st.key}
+            onClick={() => ["all", "ready", "no_contact", "followup"].includes(st.key) ? setWeekFilter(st.key) : null}
+            style={{
+              ...s.statCard(st.color),
+              cursor: ["all", "ready", "no_contact", "followup"].includes(st.key) ? "pointer" : "default",
+              outline: weekFilter === st.key ? `2px solid ${st.color}` : "none",
+              outlineOffset: 2,
+              opacity: weekFilter === st.key ? 1 : 0.8,
+              transition: "all 0.15s",
+            }}
+          >
+            <div style={{ fontSize: 22, fontWeight: 800, color: st.color }}>{st.value}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{st.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* FOLLOWUP FILTER VIEW */}
+      {weekFilter === "followup" ? (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: colors.orange, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            🔄 Düzenli Takip Firmaları ({displayFollowups.length})
+            <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted }}>— en uzun süredir aranmayan en üstte</span>
+          </div>
+          {displayFollowups.length === 0 ? (
+            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>Düzenli takipte firma yok.</div>
+          ) : displayFollowups.map(c => renderCompanyCard(c, "followup"))}
+        </div>
+      ) : (
+        /* DEFAULT / FILTERED VIEW */
+        <div>
+          {/* Section: Hedef Firmalar */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: colors.accent, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            🎯 {weekFilter === "all" ? "Hedef Firmalar" : weekFilter === "ready" ? "Aramaya Hazır Firmalar" : "Kontakt Eksik Firmalar"} ({displayCompanies.length})
+            {weekFilter !== "all" && (
+              <button style={{ ...s.btn(), padding: "2px 8px", fontSize: 10 }} onClick={() => setWeekFilter("all")}>✕ Filtreyi kaldır</button>
+            )}
+          </div>
+
+          {displayCompanies.length === 0 ? (
+            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
+              {weekFilter === "all" ? "Bu haftada henüz firma yok. Üstteki butonlardan firma ekle veya Excel yükle." :
+               weekFilter === "ready" ? "Bu haftada aramaya hazır firma yok." :
+               "Bu haftada kontakt eksik firma yok."}
+            </div>
+          ) : displayCompanies.map(c => renderCompanyCard(c, "target"))}
+
+          {/* Section: Düzenli Takip (always visible when filter is "all") */}
+          {weekFilter === "all" && allFollowups.length > 0 && (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, color: colors.orange, marginTop: 24, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                🔄 Düzenli Takip ({allFollowups.length})
+                <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted }}>— arama ritmi: 1 takip, 1 yeni hedef</span>
+              </div>
+              {displayFollowups.map(c => renderCompanyCard(c, "followup"))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // ============================================================
+  // RENDER: DASHBOARD
+  // ============================================================
+
+  const renderDashboard = () => {
+    const pipelineCounts = {};
+    data.companies.forEach(c => { pipelineCounts[c.pipeline] = (pipelineCounts[c.pipeline] || 0) + 1; });
+    const parentComps = data.companies.filter(c => c.isParent);
+
+    return (
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Dashboard</div>
+
+        {/* Main Stats */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+          <StatCard label="Toplam Firma" value={stats.totalCompanies} color={colors.accent} />
+          <StatCard label="Cihaz Yok" value={stats.noDevice} color={colors.green} sub="Hedef müşteri" />
+          <StatCard label="Cihaz Var" value={stats.hasDevice} color={colors.red} sub="Rakip mevcut" />
+          <StatCard label="Toplam Kontakt" value={stats.totalContacts} color={colors.yellow} />
+          <StatCard label="Telefon Var" value={stats.withPhone} color={colors.green} />
+          <StatCard label="Email Var" value={stats.withEmail} color={colors.yellow} />
+          <StatCard label="Sadece LinkedIn" value={stats.onlyLinkedin} color={colors.accent} />
+          <StatCard label="Çatı Firma" value={stats.parentCompanies} color={colors.purple} />
+        </div>
+
+        {/* Pipeline Distribution */}
+        <div style={s.card}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Pipeline Dağılımı</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {Object.entries(pipelineCounts).map(([stage, count]) => (
+              <div key={stage} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <PipelineBadge stage={stage} />
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Parent Companies */}
+        {parentComps.length > 0 && (
+          <div style={s.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Çatı Firmalar</div>
+            {parentComps.map(pc => {
+              const children = getChildCompanies(pc.id);
+              const pcContacts = getContacts(pc.id);
+              return (
+                <div key={pc.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${colors.border}` }}>
+                  <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                    <BuildingIcon size={14} color={colors.purple} />
+                    {pc.name}
+                    <Badge color={colors.purple} bg="#2d1a4e">{children.length} alt firma</Badge>
+                    <Badge color={colors.textMuted} bg={colors.surfaceHover}>{pcContacts.length} kontakt</Badge>
+                  </div>
+                  <div style={{ marginLeft: 22, marginTop: 4 }}>
+                    {children.map(ch => (
+                      <span key={ch.id} style={{ fontSize: 11, color: colors.textMuted, marginRight: 12 }}>
+                        → {ch.name} <PipelineBadge stage={ch.pipeline} />
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Contact Gap Report */}
+        <div style={s.card}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: colors.red }}>Kontakt Eksik Firmalar</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {data.companies.filter(c => !data.contacts.some(ct => ct.companyId === c.id)).slice(0, 15).map(c => (
+              <div key={c.id} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: colors.red }}>●</span>
+                <span>{c.name}</span>
+                <PipelineBadge stage={c.pipeline} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================
+  // RENDER: ALL COMPANIES
+  // ============================================================
+
+  const assignToWeek = (companyId, week) => {
+    updateData(prev => ({
+      ...prev,
+      companies: prev.companies.map(c => c.id === companyId ? { ...c, targetWeek: week, targetYear: currentYear } : c)
+    }));
+    setTargetWeekPicker(null);
+  };
+
+  const renderAllCompanies = () => {
+    const filterPresets = [
+      { label: "Tümü", filter: { device: "all", phone: "all", assigned: "all" }, color: colors.textMuted },
+      { label: "🎯 Cihaz Yok (Hedef)", filter: { device: "none", phone: "all", assigned: "all" }, color: colors.green },
+      { label: "📞 Telefon Var", filter: { device: "all", phone: "has_phone", assigned: "all" }, color: colors.green },
+      { label: "❌ Telefon Yok", filter: { device: "all", phone: "no_phone", assigned: "all" }, color: colors.red },
+      { label: "🎯📞 Cihaz Yok + Tel Var", filter: { device: "none", phone: "has_phone", assigned: "all" }, color: colors.accent },
+      { label: "⏳ Haftaya Atanmamış", filter: { device: "all", phone: "all", assigned: "unassigned" }, color: colors.orange },
+      { label: "⚔️ Cihaz Var (Rakip)", filter: { device: "competitor", phone: "all", assigned: "all" }, color: colors.red },
+    ];
+
+    const isPresetActive = (preset) =>
+      companyFilter.device === preset.filter.device &&
+      companyFilter.phone === preset.filter.phone &&
+      companyFilter.assigned === preset.filter.assigned;
+
+    return (
+      <div>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Firmalar</div>
+          <div style={{ flex: 1, maxWidth: 300, position: "relative" }}>
+            <SearchIcon size={14} color={colors.textDim} style={{ position: "absolute", left: 8, top: 8 }} />
+            <input style={{ ...s.input, paddingLeft: 28 }} placeholder="Firma ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          </div>
+          <span style={{ fontSize: 12, color: colors.textMuted }}>{filteredCompanies.length} / {data.companies.length} firma</span>
+        </div>
+
+        {/* Quick Filter Presets */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 12 }}>
+          {filterPresets.map((p, i) => (
+            <button
+              key={i}
+              style={{
+                ...s.btn(isPresetActive(p) ? "primary" : "default"),
+                fontSize: 11,
+                padding: "4px 10px",
+                outline: isPresetActive(p) ? `2px solid ${p.color}` : "none",
+                outlineOffset: 1,
+              }}
+              onClick={() => setCompanyFilter(p.filter)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Hedef Haftaya Atama Barı */}
+        <div style={{ ...s.card, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, background: colors.accentDim, border: `1px solid ${colors.accent}30` }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: colors.accent }}>Hedef Haftaya Ata:</span>
+          <button style={s.btn(assignWeek === currentWeek ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek)}>Bu Hafta ({currentWeek})</button>
+          <button style={s.btn(assignWeek === currentWeek + 1 ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek + 1)}>Sonraki ({currentWeek + 1})</button>
+          <button style={s.btn(assignWeek === currentWeek + 2 ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek + 2)}>+2 ({currentWeek + 2})</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 11, color: colors.textMuted }}>Özel:</span>
+            <input type="number" style={{ ...s.input, width: 60, padding: "4px 8px" }} value={assignWeek} onChange={(e) => setAssignWeek(parseInt(e.target.value) || currentWeek)} min={1} max={53} />
+          </div>
+          <span style={{ fontSize: 10, color: colors.textDim }}>{getWeekDates(assignWeek).label}</span>
+        </div>
+
+        {/* Table */}
+        <div style={{ overflowX: "auto" }}>
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>Firma</th>
+                <th style={s.th}>Çatı</th>
+                <th style={s.th}>Cihaz</th>
+                <th style={s.th}>Pipeline</th>
+                <th style={s.th}>Kontakt</th>
+                <th style={s.th}>Hafta</th>
+                <th style={s.th}>Hedef Ata</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCompanies.map(c => {
+                const cts = getContacts(c.id);
+                const parent = getParentCompany(c.id);
+                const hasPhone = cts.some(ct => ct.phone);
+                const hasEmail = cts.some(ct => ct.email);
+                const isAssigned = !!c.targetWeek;
+                return (
+                  <tr key={c.id} style={{ background: isAssigned ? "rgba(59,130,246,0.03)" : "transparent" }}>
+                    <td style={{ ...s.td, fontWeight: 600 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: hasPhone ? colors.green : cts.length > 0 ? colors.yellow : colors.red, fontSize: 8 }}>●</span>
+                        <span style={{ cursor: "pointer" }} onClick={() => { setExpandedFirm(c.id); if (c.targetWeek) { setActiveTab("weekly"); setSelectedWeek(c.targetWeek); } }}>{c.name}</span>
+                      </div>
+                    </td>
+                    <td style={s.td}>
+                      <select
+                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", minWidth: 100, color: c.isParent ? colors.purple : c.parentId ? colors.purple : colors.textDim, background: "transparent", border: `1px solid ${colors.border}` }}
+                        value={c.isParent ? "_self" : c.parentId || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === "_self") {
+                            updateCompanyField(c.id, "isParent", true);
+                            updateCompanyField(c.id, "parentId", null);
+                          } else if (val === "") {
+                            updateCompanyField(c.id, "isParent", false);
+                            updateCompanyField(c.id, "parentId", null);
+                          } else {
+                            updateCompanyField(c.id, "isParent", false);
+                            updateCompanyField(c.id, "parentId", val);
+                          }
+                        }}
+                      >
+                        <option value="">— Yok —</option>
+                        <option value="_self">🏢 Kendisi çatı</option>
+                        {data.companies.filter(p => p.isParent && p.id !== c.id).map(p => (
+                          <option key={p.id} value={p.id}>↳ {p.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={s.td}><DeviceBadge status={c.deviceStatus} brand={c.deviceBrand}/></td>
+                    <td style={s.td}><PipelineBadge stage={c.pipeline}/></td>
+                    <td style={s.td}>
+                      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                        {hasPhone && <Badge color={colors.green} bg={colors.greenDim}>📞 {cts.filter(ct=>ct.phone).length}</Badge>}
+                        {hasEmail && <Badge color={colors.yellow} bg={colors.yellowDim}>✉️ {cts.filter(ct=>ct.email).length}</Badge>}
+                        {cts.length > 0 && !hasPhone && !hasEmail && <Badge color={colors.accent} bg={colors.accentDim}>🔗 {cts.length}</Badge>}
+                        {cts.length === 0 && <Badge color={colors.red} bg={colors.redDim}>0</Badge>}
+                      </div>
+                    </td>
+                    <td style={s.td}>
+                      {c.targetWeek ? (
+                        <Badge color={colors.accent} bg={colors.accentDim}>H{c.targetWeek}</Badge>
+                      ) : (
+                        <span style={{ color: colors.textDim, fontSize: 11 }}>—</span>
+                      )}
+                    </td>
+                    <td style={s.td}>
+                      <button
+                        style={{ ...s.btn("primary"), padding: "3px 10px", fontSize: 11 }}
+                        onClick={() => assignToWeek(c.id, assignWeek)}
+                        title={`Hafta ${assignWeek}'e ata (${getWeekDates(assignWeek).label})`}
+                      >
+                        → H{assignWeek}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================
+  // RENDER: COMPETITORS
+  // ============================================================
+
+  const renderCompetitors = () => {
+    const brands = {};
+    data.companies.filter(c => c.deviceStatus === "competitor" && c.deviceBrand).forEach(c => {
+      if (!brands[c.deviceBrand]) brands[c.deviceBrand] = [];
+      brands[c.deviceBrand].push(c);
+    });
+
+    return (
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Rakip Analizi</div>
+        {Object.keys(brands).length === 0 ? (
+          <div style={{ ...s.card, color: colors.textMuted, textAlign: "center" }}>Henüz rakip firma bilgisi yok. AVM Excel yükleyerek başlayın.</div>
+        ) : (
+          Object.entries(brands).map(([brand, companies]) => (
+            <div key={brand} style={s.card}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>{brand}</span>
+                <Badge color={colors.red} bg={colors.redDim}>{companies.length} firma</Badge>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {companies.map(c => (
+                  <div key={c.id} style={{ fontSize: 12, color: colors.textMuted }}>
+                    → {c.name}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================
+  // RENDER: TO-DO LIST
+  // ============================================================
+
+  const renderTodos = () => {
+    // Auto-generate todos from pipeline state
+    const autoTodos = [];
+
+    data.companies.forEach(c => {
+      const cts = getContacts(c.id);
+      const hasPhone = cts.some(ct => ct.phone);
+      const logs = getCallLogs(c.id);
+      const lastLog = logs[0];
+
+      if (c.pipeline === "new_target" && cts.length === 0) {
+        autoTodos.push({ id: `auto-${c.id}-contact`, type: "auto", priority: 1, text: `Kontakt bul: ${c.name}`, company: c.name, companyId: c.id, category: "kontakt" });
+      }
+      if (c.pipeline === "new_target" && cts.length > 0 && !hasPhone) {
+        autoTodos.push({ id: `auto-${c.id}-phone`, type: "auto", priority: 2, text: `Telefon bul: ${c.name} (${cts.length} kontakt var, tel yok)`, company: c.name, companyId: c.id, category: "kontakt" });
+      }
+      if (c.pipeline === "contact_ready" && c.targetWeek === selectedWeek) {
+        autoTodos.push({ id: `auto-${c.id}-call`, type: "auto", priority: 1, text: `Ara: ${c.name}`, company: c.name, companyId: c.id, category: "arama" });
+      }
+      if (c.pipeline === "unreached") {
+        autoTodos.push({ id: `auto-${c.id}-retry`, type: "auto", priority: 3, text: `Tekrar ara: ${c.name}`, company: c.name, companyId: c.id, category: "arama" });
+      }
+      if (c.pipeline === "regular_followup") {
+        const daysSince = lastLog ? Math.floor((Date.now() - new Date(lastLog.date)) / 86400000) : 999;
+        autoTodos.push({ id: `auto-${c.id}-followup`, type: "auto", priority: daysSince > 7 ? 1 : 3, text: `Takip araması: ${c.name} (${daysSince} gün oldu)`, company: c.name, companyId: c.id, category: "takip" });
+      }
+      if (c.pipeline === "meeting_scheduled") {
+        autoTodos.push({ id: `auto-${c.id}-meeting`, type: "auto", priority: 1, text: `Toplantı: ${c.name}`, company: c.name, companyId: c.id, category: "toplantı" });
+      }
+    });
+
+    // Combine auto + manual todos
+    const manualTodos = data.todos || [];
+    const allTodos = [...autoTodos, ...manualTodos].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+    const categories = { kontakt: "🔍 Kontakt", arama: "📞 Arama", takip: "🔄 Takip", toplantı: "📅 Toplantı", genel: "📌 Genel" };
+    const grouped = {};
+    allTodos.forEach(t => {
+      const cat = t.category || "genel";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(t);
+    });
+
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>To-Do ({allTodos.length})</div>
+          <button style={s.btn("primary")} onClick={() => {
+            const text = prompt("Yeni to-do:");
+            if (text) updateData(prev => ({ ...prev, todos: [...(prev.todos || []), { id: uid(), text, type: "manual", category: "genel", priority: 5, done: false, createdAt: new Date().toISOString() }] }));
+          }}><PlusIcon size={14}/> Ekle</button>
+        </div>
+
+        {Object.entries(grouped).map(([cat, items]) => (
+          <div key={cat} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>{categories[cat] || cat} ({items.length})</div>
+            {items.map(todo => (
+              <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, opacity: todo.done ? 0.4 : 1 }}>
+                {todo.type === "manual" && (
+                  <input type="checkbox" checked={todo.done || false} onChange={() => {
+                    updateData(prev => ({
+                      ...prev,
+                      todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: !t.done } : t)
+                    }));
+                  }} />
+                )}
+                <span style={{ fontSize: 10, color: todo.priority <= 1 ? colors.red : todo.priority <= 2 ? colors.orange : colors.textDim, fontWeight: 700, minWidth: 16 }}>
+                  {todo.priority <= 1 ? "!" : todo.priority <= 2 ? "•" : ""}
+                </span>
+                <span style={{ flex: 1, fontSize: 12, textDecoration: todo.done ? "line-through" : "none" }}>{todo.text}</span>
+                {todo.type === "auto" && <Badge color={colors.textDim} bg={colors.surfaceHover}>otomatik</Badge>}
+                {todo.type === "manual" && (
+                  <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => {
+                    updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }));
+                  }}><TrashIcon size={10}/></button>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {allTodos.length === 0 && (
+          <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
+            Yapılacak bir şey yok! Firma ve kontakt eklediğinde otomatik to-do'lar oluşacak.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================
+  // MODALS
+  // ============================================================
+
+  const renderModals = () => (
+    <>
+      {/* Import Preview Modal */}
+      {importPreview && (
+        <div style={s.modal} onClick={() => setImportPreview(null)}>
+          <div style={{ ...s.modalContent, maxWidth: 900 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>
+                Excel Önizleme — {importType === "lusha" ? "Lusha Kontakt" : "AVM Analiz"} ({importPreview.rows.length} satır{importPreview.fileCount > 1 ? `, ${importPreview.fileCount} dosya` : ""})
+              </div>
+              <button style={s.btn("danger")} onClick={() => setImportPreview(null)}><XIcon size={14}/></button>
+            </div>
+
+            <div style={{ overflowX: "auto", marginBottom: 16, maxHeight: 400, overflowY: "auto" }}>
+              <table style={s.table}>
+                <thead>
+                  <tr>{importPreview.headers.map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {importPreview.rows.slice(0, 50).map((row, i) => (
+                    <tr key={i}>
+                      {importPreview.headers.map(h => <td key={h} style={s.td}>{row[h]}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {importPreview.rows.length > 50 && <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8 }}>...ve {importPreview.rows.length - 50} satır daha</div>}
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={s.btn("primary")} onClick={() => importType === "lusha" ? processLushaImport(importPreview) : processAVMImport(importPreview)}>
+                <CheckIcon size={14}/> İçe Aktar ({importPreview.rows.length} satır)
+              </button>
+              <button style={s.btn()} onClick={() => setImportPreview(null)}>İptal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Company Modal */}
+      {showModal === "addCompany" && (
+        <div style={s.modal} onClick={() => setShowModal(null)}>
+          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Yeni Firma Ekle</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Firma Adı *</label>
+                <input style={s.input} value={modalData.name || ""} onChange={e => setModalData({ ...modalData, name: e.target.value })} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Cihaz Durumu</label>
+                  <select style={s.select} value={modalData.deviceStatus} onChange={e => setModalData({ ...modalData, deviceStatus: e.target.value })}>
+                    <option value="unknown">Bilinmiyor</option>
+                    <option value="none">Cihaz Yok</option>
+                    <option value="competitor">Cihaz Var</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Cihaz Markası</label>
+                  <input style={s.input} value={modalData.deviceBrand || ""} onChange={e => setModalData({ ...modalData, deviceBrand: e.target.value })} placeholder="ör: vcount" />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>LinkedIn URL</label>
+                  <input style={s.input} value={modalData.linkedin || ""} onChange={e => setModalData({ ...modalData, linkedin: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Website</label>
+                  <input style={s.input} value={modalData.website || ""} onChange={e => setModalData({ ...modalData, website: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Hedef Hafta</label>
+                <input style={{ ...s.input, width: 80 }} type="number" value={modalData.targetWeek} onChange={e => setModalData({ ...modalData, targetWeek: parseInt(e.target.value) })} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={modalData.isParent} onChange={e => setModalData({ ...modalData, isParent: e.target.checked })} />
+                <label style={{ fontSize: 12 }}>Bu bir çatı firmadır</label>
+              </div>
+              {!modalData.isParent && (
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Çatı Firma</label>
+                  <select style={s.select} value={modalData.parentId || ""} onChange={e => setModalData({ ...modalData, parentId: e.target.value })}>
+                    <option value="">Yok</option>
+                    {data.companies.filter(c => c.isParent).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Notlar</label>
+                <textarea style={{ ...s.input, height: 50 }} value={modalData.notes || ""} onChange={e => setModalData({ ...modalData, notes: e.target.value })} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button style={s.btn("primary")} onClick={saveCompany}>Kaydet</button>
+              <button style={s.btn()} onClick={() => setShowModal(null)}>İptal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Contact Modal */}
+      {showModal === "addContact" && (
+        <div style={s.modal} onClick={() => setShowModal(null)}>
+          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Yeni Kontakt Ekle</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>İsim Soyisim *</label>
+                <input style={s.input} value={modalData.name || ""} onChange={e => setModalData({ ...modalData, name: e.target.value })} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Ünvan</label>
+                <input style={s.input} value={modalData.title || ""} onChange={e => setModalData({ ...modalData, title: e.target.value })} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Telefon</label>
+                  <input style={s.input} value={modalData.phone || ""} onChange={e => setModalData({ ...modalData, phone: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Email</label>
+                  <input style={s.input} value={modalData.email || ""} onChange={e => setModalData({ ...modalData, email: e.target.value })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>LinkedIn URL</label>
+                  <input style={s.input} value={modalData.linkedin || ""} onChange={e => setModalData({ ...modalData, linkedin: e.target.value })} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button style={s.btn("primary")} onClick={saveContact}>Kaydet</button>
+              <button style={s.btn()} onClick={() => setShowModal(null)}>İptal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Call Log Modal */}
+      {showModal === "callLog" && callResult && (
+        <div style={s.modal} onClick={() => { setShowModal(null); setCallResult(null); }}>
+          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Arama Notu</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>{callResult.companyName} → {callResult.contactName}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Sonuç *</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {[
+                    { value: "meeting", label: "✅ Toplantı Alındı", color: colors.green },
+                    { value: "introduced", label: "🤝 Tanışıldı", color: colors.yellow },
+                    { value: "unreached", label: "❌ Ulaşılamadı", color: colors.red },
+                    { value: "wrong_number", label: "⚠️ Yanlış Numara", color: colors.orange },
+                    { value: "not_interested", label: "🚫 İlgilenmiyor", color: colors.textDim },
+                  ].map(opt => (
+                    <button key={opt.value} style={{ ...s.btn(callResult.result === opt.value ? "primary" : "default"), borderColor: opt.color }} onClick={() => setCallResult({ ...callResult, result: opt.value })}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {callResult.result === "meeting" && (
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Toplantı Tarihi</label>
+                  <input type="date" style={s.input} value={callResult.meetingDate || ""} onChange={e => setCallResult({ ...callResult, meetingDate: e.target.value })} />
+                </div>
+              )}
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Notlar</label>
+                <textarea style={{ ...s.input, height: 80 }} value={callResult.notes || ""} onChange={e => setCallResult({ ...callResult, notes: e.target.value })} placeholder="Görüşme notlarını yaz..." />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button style={s.btn("primary")} onClick={saveCallLog} disabled={!callResult.result}>Kaydet ve Profil Doldur →</button>
+              <button style={s.btn()} onClick={() => { setShowModal(null); setCallResult(null); }}>İptal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Character Profile Modal */}
+      {showModal === "charProfile" && callResult && (
+        <div style={s.modal} onClick={() => { setShowModal(null); setCallResult(null); }}>
+          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Karakter Profili</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>{callResult.contactName} — bu bilgiler sonraki aramalarda sana rehber olacak</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { key: "communication", label: "İletişim tarzı nasıldı?", options: ["Resmi", "Samimi", "Kısa-net", "Çok konuşkan"] },
+                { key: "decisionAuth", label: "Karar verme yetkisi?", options: ["Tek karar verici", "Üstüne danışacak", "Komite kararı", "Belirsiz"] },
+                { key: "decisionSpeed", label: "Karar verme hızı?", options: ["Hızlı", "Yavaş/düşünür", "Erteleyici"] },
+                { key: "arguments", label: "Ne tür argümanlara açık?", options: ["Maliyet", "Teknoloji", "Referans/kanıt", "ROI", "Marka"] },
+                { key: "competitorOpinion", label: "Rakip hakkında ne düşünüyor?", options: ["Memnun", "Şikayetçi", "Nötr", "Bilgisi yok"] },
+                { key: "priceSensitivity", label: "Fiyat hassasiyeti?", options: ["Çok hassas", "Makul", "Değer önemli"] },
+                { key: "urgency", label: "Aciliyeti var mı?", options: ["Acil", "Planlı bütçe", "Acele yok", "Bilgi topluyor"] },
+              ].map(field => (
+                <div key={field.key}>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>{field.label}</label>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {field.options.map(opt => (
+                      <button key={opt} style={s.btn(charProfile[field.key] === opt ? "primary" : "default")} onClick={() => setCharProfile({ ...charProfile, [field.key]: opt })}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Kişisel gözlemler (en değerli alan!)</label>
+                <textarea style={{ ...s.input, height: 60 }} value={charProfile.personalNotes || ""} onChange={e => setCharProfile({ ...charProfile, personalNotes: e.target.value })} placeholder="futbol sever, sabah aramaları tercih ediyor, asistanı üzerinden iletiyor..." />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button style={s.btn("primary")} onClick={saveCharProfile}>Kaydet</button>
+              <button style={s.btn()} onClick={() => { setShowModal(null); setCallResult(null); }}>Atla</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ============================================================
+  // MAIN RENDER
+  // ============================================================
+
+  return (
+    <div style={s.app}>
+      {/* Header */}
+      <div style={s.header}>
+        <div style={s.logo}>REMVISION SALES</div>
+        <div style={s.tabs}>
+          {[
+            { id: "weekly", label: `📅 Hafta ${selectedWeek}` },
+            { id: "dashboard", label: "📊 Dashboard" },
+            { id: "companies", label: "🏢 Firmalar" },
+            { id: "competitors", label: "⚔️ Rakipler" },
+            { id: "todos", label: "✅ To-Do" },
+          ].map(t => (
+            <button key={t.id} style={s.tab(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button style={s.btn("primary")} onClick={openAddCompany}><PlusIcon size={14}/> Firma Ekle</button>
+          <button style={s.btn()} onClick={() => { setImportType("lusha"); fileInputRef.current?.click(); }}><UploadIcon size={14}/> Lusha</button>
+          <button style={s.btn()} onClick={() => { setImportType("avm"); fileInputAvmRef.current?.click(); }}><UploadIcon size={14}/> AVM</button>
+          <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style={{ display: "none" }} multiple onChange={(e) => { setImportType("lusha"); handleFileUpload(e); }} />
+          <input ref={fileInputAvmRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style={{ display: "none" }} onChange={(e) => { setImportType("avm"); handleFileUpload(e); }} />
+          <div style={{ width: 1, height: 20, background: colors.border, margin: "0 4px" }}/>
+          <button style={s.btn()} onClick={() => showSync("Manuel senkronizasyon ✓")} title="Manuel Sync">
+            <SyncIcon size={14}/>
+          </button>
+          <span style={{ fontSize: 10, color: colors.textDim }}>tugay.demircan@remvisionlab.com</span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={s.content}>
+        {activeTab === "weekly" && renderWeeklyView()}
+        {activeTab === "dashboard" && renderDashboard()}
+        {activeTab === "companies" && renderAllCompanies()}
+        {activeTab === "competitors" && renderCompetitors()}
+        {activeTab === "todos" && renderTodos()}
+      </div>
+
+      {/* Modals */}
+      {renderModals()}
+
+      {/* Sync Notification */}
+      <div style={s.syncBar(!!syncNotif)}>
+        <SyncIcon size={14} color={colors.green} />
+        {syncNotif}
+      </div>
+    </div>
+  );
+}
