@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RemVision Sales Pipeline</title>
+<title>RemVision Sales v3</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -18,6 +19,10 @@ body { background: #0a0e17; overflow: auto; }
 ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
 input:focus, select:focus, textarea:focus { border-color: #3b82f6 !important; }
 a { color: #3b82f6; }
+/* Responsive */
+@media (max-width: 768px) {
+  .stat-card { min-width: 80px !important; }
+}
 </style>
 </head>
 <body>
@@ -203,6 +208,10 @@ const s = {
   td: { padding: "8px 10px", borderBottom: `1px solid ${colors.border}`, verticalAlign: "top" },
   modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, backdropFilter: "blur(4px)" },
   modalContent: { background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12, padding: 24, maxWidth: 600, width: "90%", maxHeight: "80vh", overflowY: "auto" },
+  sidePanel: { position: "fixed", top: 0, right: 0, bottom: 0, width: 420, maxWidth: "90vw", background: colors.surface, borderLeft: `1px solid ${colors.border}`, boxShadow: "-4px 0 20px rgba(0,0,0,0.3)", zIndex: 200, display: "flex", flexDirection: "column" },
+  sidePanelLeft: { position: "fixed", top: 0, left: 0, bottom: 0, width: 700, maxWidth: "60vw", background: colors.surface, borderRight: `1px solid ${colors.border}`, boxShadow: "4px 0 20px rgba(0,0,0,0.3)", zIndex: 201, display: "flex", flexDirection: "column" },
+  sidePanelContent: { flex: 1, padding: 20, overflowY: "auto" },
+  sidePanelBackdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 199 },
   syncBar: (visible) => ({ position: "fixed", bottom: 16, right: 16, background: colors.greenDim, border: `1px solid ${colors.green}`, borderRadius: 8, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: colors.green, opacity: visible ? 1 : 0, transition: "opacity 0.3s", pointerEvents: visible ? "auto" : "none", zIndex: 300 }),
 };
 
@@ -255,10 +264,12 @@ const PipelineBadge = ({ stage }) => {
 };
 
 const DeviceBadge = ({ status, brand }) => {
-  if (!status || status === "unknown") return <Badge color={colors.textDim} bg={colors.surfaceHover}>❓ Bilinmiyor</Badge>;
-  if (status === "none") return <Badge color={colors.green} bg={colors.greenDim}>Cihaz Yok ✓</Badge>;
-  if (status === "ours") return <Badge color={colors.accent} bg={colors.accentDim}>🏠 Bizde</Badge>;
-  return <Badge color={colors.red} bg={colors.redDim}>{brand || "Cihaz Var"}</Badge>;
+  const truncate = (text, max = 10) => text && text.length > max ? text.slice(0, max) + "…" : text;
+  if (!status || status === "unknown") return <Badge color={colors.textDim} bg={colors.surfaceHover} title="Bilinmiyor">❓</Badge>;
+  if (status === "none") return <Badge color={colors.green} bg={colors.greenDim} title="Cihaz Yok">✓ Yok</Badge>;
+  if (status === "ours") return <Badge color={colors.accent} bg={colors.accentDim} title="Bizde">🏠</Badge>;
+  const fullBrand = brand || "Cihaz Var";
+  return <Badge color={colors.red} bg={colors.redDim} title={fullBrand}>{truncate(fullBrand)}</Badge>;
 };
 
 // ============================================================
@@ -266,15 +277,14 @@ const DeviceBadge = ({ status, brand }) => {
 // ============================================================
 
 const parseExcel = (text, separator = "\t") => {
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return { headers: [], rows: [] };
-  const headers = lines[0].split(separator).map(h => h.trim());
-  const rows = lines.slice(1).map(line => {
-    const vals = line.split(separator);
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || "").trim(); });
-    return obj;
+  // Use Papa Parse for proper multiline CSV handling
+  const result = Papa.parse(text, {
+    header: true,
+    skipEmptyLines: true,
+    delimiter: separator === "\t" ? "\t" : ","
   });
+  const headers = result.meta.fields || [];
+  const rows = result.data || [];
   return { headers, rows };
 };
 
@@ -301,6 +311,8 @@ function SalesPipelineApp() {
   const [companyFilter, setCompanyFilter] = useState({ device: "all", phone: "all", assigned: "all" }); // device: all|none|competitor, phone: all|has_phone|no_phone, assigned: all|unassigned|assigned
   const [targetWeekPicker, setTargetWeekPicker] = useState(null); // { companyId, show }
   const [assignWeek, setAssignWeek] = useState(currentWeek);
+  const [selectedContact, setSelectedContact] = useState(null); // For contact profile modal
+  const [showCallPanel, setShowCallPanel] = useState(false); // Separate state for call panel (can coexist with modals)
 
   // Auto-save
   useEffect(() => { saveData(data); }, [data]);
@@ -469,9 +481,10 @@ function SalesPipelineApp() {
         const bomName = "\ufeff" + name;
         if (row[bomName] !== undefined && row[bomName] !== null && row[bomName] !== "") return String(row[bomName]);
         if (row[name] !== undefined && row[name] !== null && row[name] !== "") return String(row[name]);
+        // Only exact match (case insensitive) - no includes to avoid "Company Country" matching "Company"
         const key = Object.keys(row).find(k => {
-          const clean = k.replace(/^\ufeff/, "");
-          return turkishLower(clean) === turkishLower(name) || turkishLower(clean).includes(turkishLower(name));
+          const clean = k.replace(/^\ufeff/, "").trim();
+          return turkishLower(clean) === turkishLower(name);
         });
         if (key && row[key] !== undefined && row[key] !== null && row[key] !== "") return String(row[key]);
       }
@@ -481,15 +494,16 @@ function SalesPipelineApp() {
     updateData(prev => {
       const next = { ...prev, contacts: [...prev.contacts], companies: [...prev.companies] };
 
-      rows.forEach(row => {
+      rows.forEach((row, idx) => {
         // Build full name
         const fullName = findCol(row, "Full Name", "Name", "İsim", "Ad Soyad");
         const firstName = findCol(row, "First Name", "Ad");
         const lastName = findCol(row, "Last Name", "Soyad");
         const name = fullName || `${firstName} ${lastName}`.trim();
 
-        // Company
-        const company = findCol(row, "Company Name", "Company", "Firma", "Şirket");
+        // Company - ONLY from "Company Name" column, nothing else
+        const companyRaw = row["Company Name"] !== undefined ? row["Company Name"] : (row["\ufeffCompany Name"] || "");
+        const company = (typeof companyRaw === "string" ? companyRaw : String(companyRaw || "")).trim();
 
         // If neither name nor company, truly empty row — skip
         if (!name && !company) return;
@@ -575,7 +589,7 @@ function SalesPipelineApp() {
         }
 
         // Update company pipeline if contact has phone
-        if (phone && comp.pipeline === "new_target") {
+        if (phone && (comp.pipeline === "new_target" || comp.pipeline === "searching_contact")) {
           comp.pipeline = "contact_ready";
         } else if ((email || linkedin) && comp.pipeline === "new_target") {
           comp.pipeline = "searching_contact";
@@ -596,7 +610,8 @@ function SalesPipelineApp() {
     const findCol = (row, ...names) => {
       for (const name of names) {
         if (row[name] !== undefined && row[name] !== null && row[name] !== "") return String(row[name]);
-        const key = Object.keys(row).find(k => turkishLower(k).includes(turkishLower(name)));
+        // Exact match only (case insensitive)
+        const key = Object.keys(row).find(k => turkishLower(k.trim()) === turkishLower(name));
         if (key && row[key] !== undefined && row[key] !== null && row[key] !== "") return String(row[key]);
       }
       return "";
@@ -710,10 +725,22 @@ function SalesPipelineApp() {
   };
 
   const saveContact = () => {
-    updateData(prev => ({
-      ...prev,
-      contacts: [...prev.contacts, { ...modalData, id: uid(), status: "active", priority: prev.contacts.filter(c => c.companyId === modalData.companyId).length + 1, createdAt: new Date().toISOString() }]
-    }));
+    updateData(prev => {
+      const newContact = { ...modalData, id: uid(), status: "active", priority: prev.contacts.filter(c => c.companyId === modalData.companyId).length + 1, createdAt: new Date().toISOString() };
+      let updatedCompanies = prev.companies;
+
+      // Auto-update pipeline to "contact_ready" if phone provided
+      if (modalData.phone) {
+        const company = prev.companies.find(c => c.id === modalData.companyId);
+        if (company && (company.pipeline === "new_target" || company.pipeline === "searching_contact")) {
+          updatedCompanies = prev.companies.map(c =>
+            c.id === modalData.companyId ? { ...c, pipeline: "contact_ready" } : c
+          );
+        }
+      }
+
+      return { ...prev, contacts: [...prev.contacts, newContact], companies: updatedCompanies };
+    });
     setShowModal(null);
   };
 
@@ -725,8 +752,8 @@ function SalesPipelineApp() {
   };
 
   const openCallLog = (company, contact) => {
-    setCallResult({ companyId: company.id, contactId: contact.id, contactName: contact.name, companyName: company.name, result: "", notes: "", meetingDate: "", date: new Date().toISOString(), week: selectedWeek, year: currentYear });
-    setShowModal("callLog");
+    setCallResult({ companyId: company.id, contactId: contact.id, contactName: contact.name, companyName: company.name, phone: contact.phone, result: "", notes: "", meetingDate: "", date: new Date().toISOString(), week: selectedWeek, year: currentYear });
+    setShowCallPanel(true);
   };
 
   const saveCallLog = () => {
@@ -740,13 +767,39 @@ function SalesPipelineApp() {
         else if (callResult.result === "unreached") comp.pipeline = "unreached";
         else if (callResult.result === "not_interested") comp.pipeline = "not_interested";
       }
+      // Update contact status when reached
+      if (callResult.result === "introduced" || callResult.result === "meeting") {
+        next.contacts = next.contacts.map(c =>
+          c.id === callResult.contactId ? { ...c, reached: true, reachedAt: new Date().toISOString() } : c
+        );
+      }
+      // Add WhatsApp to-do if checked
+      if (callResult.sendWhatsApp) {
+        const today = new Date();
+        next.todos = [...(next.todos || []), {
+          id: uid(),
+          text: `📱 WhatsApp'tan kişi kartı ilet — ${callResult.contactName} (${callResult.companyName})`,
+          todoKey: "whatsapp",
+          type: "manual",
+          category: "takip",
+          priority: 1,
+          done: false,
+          contactId: callResult.contactId,
+          companyId: callResult.companyId,
+          targetDate: today.toISOString().split("T")[0],
+          targetWeek: getWeekNumber(today),
+          targetYear: today.getFullYear(),
+          createdAt: new Date().toISOString()
+        }];
+      }
       return next;
     });
     // Show character profile after call
+    setShowCallPanel(false);
     setShowModal("charProfile");
   };
 
-  const [charProfile, setCharProfile] = useState({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", pricesSensitivity: "", urgency: "", personalNotes: "" });
+  const [charProfile, setCharProfile] = useState({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", priceSensitivity: "", urgency: "", personalNotes: "", nextCallAsk: "" });
 
   const saveCharProfile = () => {
     updateData(prev => {
@@ -755,11 +808,69 @@ function SalesPipelineApp() {
       const profile = { ...charProfile, contactId: callResult.contactId, updatedAt: new Date().toISOString() };
       if (existing >= 0) profiles[existing] = { ...profiles[existing], ...profile };
       else profiles.push({ ...profile, id: uid() });
-      return { ...prev, contactProfiles: profiles };
+
+      // Get contact's follow-up info to set target date
+      const contact = prev.contacts.find(c => c.id === callResult.contactId);
+      let targetDate = null;
+      let targetWeek = null;
+      let targetYear = null;
+
+      if (contact?.followUpDays) {
+        const d = new Date();
+        d.setDate(d.getDate() + contact.followUpDays);
+        targetDate = d.toISOString().split("T")[0];
+        targetWeek = getWeekNumber(d);
+        targetYear = d.getFullYear();
+      } else if (contact?.nextCallDate) {
+        targetDate = contact.nextCallDate;
+        targetWeek = getWeekNumber(new Date(contact.nextCallDate));
+        targetYear = new Date(contact.nextCallDate).getFullYear();
+      }
+
+      // Auto-create to-dos for "Sorulmadı" fields
+      let todos = [...(prev.todos || [])];
+      const sorulmadiLabels = {
+        communication: "İletişim tarzı nasıl?",
+        decisionAuth: "Karar verme yetkisi kim?",
+        decisionSpeed: "Karar verme hızı nasıl?",
+        arguments: "Ne tür argümanlara açık?",
+        competitorOpinion: "Rakip hakkında ne düşünüyor?",
+        priceSensitivity: "Fiyat hassasiyeti nedir?",
+        urgency: "Aciliyeti var mı?"
+      };
+
+      Object.keys(sorulmadiLabels).forEach(key => {
+        if (charProfile[key] === "Sorulmadı") {
+          // Check if to-do already exists
+          const existingTodo = todos.find(t => t.contactId === callResult.contactId && t.profileKey === key && !t.done);
+          if (!existingTodo) {
+            todos.push({
+              id: uid(),
+              text: `❓ ${sorulmadiLabels[key]} — ${callResult.contactName} (${callResult.companyName})`,
+              profileKey: key,
+              type: "manual",
+              category: "arama",
+              priority: 2,
+              done: false,
+              contactId: callResult.contactId,
+              companyId: callResult.companyId,
+              targetDate,
+              targetWeek,
+              targetYear,
+              createdAt: new Date().toISOString()
+            });
+          }
+        } else {
+          // Remove existing to-do if not "Sorulmadı" anymore
+          todos = todos.filter(t => !(t.contactId === callResult.contactId && t.profileKey === key && !t.done));
+        }
+      });
+
+      return { ...prev, contactProfiles: profiles, todos };
     });
     setShowModal(null);
     setCallResult(null);
-    setCharProfile({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", pricesSensitivity: "", urgency: "", personalNotes: "" });
+    setCharProfile({ communication: "", decisionAuth: "", decisionSpeed: "", arguments: "", competitorOpinion: "", priceSensitivity: "", urgency: "", personalNotes: "", nextCallAsk: "" });
   };
 
   const updateCompanyField = (companyId, field, value) => {
@@ -770,10 +881,62 @@ function SalesPipelineApp() {
   };
 
   const updateContactField = (contactId, field, value) => {
-    updateData(prev => ({
-      ...prev,
-      contacts: prev.contacts.map(c => c.id === contactId ? { ...c, [field]: value } : c)
-    }));
+    updateData(prev => {
+      const updatedContacts = prev.contacts.map(c => c.id === contactId ? { ...c, [field]: value } : c);
+      const contact = updatedContacts.find(c => c.id === contactId);
+      let updatedCompanies = prev.companies;
+      let updatedTodos = [...(prev.todos || [])];
+
+      // Auto-update pipeline to "contact_ready" if phone added
+      if (field === "phone" && value && contact) {
+        const company = prev.companies.find(c => c.id === contact.companyId);
+        if (company && (company.pipeline === "new_target" || company.pipeline === "searching_contact")) {
+          updatedCompanies = prev.companies.map(c =>
+            c.id === contact.companyId ? { ...c, pipeline: "contact_ready" } : c
+          );
+        }
+      }
+
+      // Create follow-up to-do when followUpDays is set
+      if (field === "followUpDays" && value && contact) {
+        const company = prev.companies.find(c => c.id === contact.companyId);
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() + value);
+        const targetWeek = getWeekNumber(targetDate);
+        const targetDateStr = targetDate.toISOString().split("T")[0];
+        const targetYear = targetDate.getFullYear();
+
+        // Remove existing follow-up to-do for this contact
+        updatedTodos = updatedTodos.filter(t => !(t.contactId === contactId && t.todoKey === "followup_call"));
+
+        // Add new follow-up to-do
+        updatedTodos.push({
+          id: uid(),
+          text: `📞 Takip araması — ${contact.name} (${company?.name})`,
+          todoKey: "followup_call",
+          type: "manual",
+          category: "arama",
+          priority: 2,
+          done: false,
+          contactId: contactId,
+          companyId: contact.companyId,
+          targetDate: targetDateStr,
+          targetWeek: targetWeek,
+          targetYear: targetYear,
+          createdAt: new Date().toISOString()
+        });
+
+        // Also update existing "Sorulmadı" profile to-dos for this contact
+        updatedTodos = updatedTodos.map(t => {
+          if (t.contactId === contactId && t.profileKey && !t.done) {
+            return { ...t, targetDate: targetDateStr, targetWeek, targetYear };
+          }
+          return t;
+        });
+      }
+
+      return { ...prev, contacts: updatedContacts, companies: updatedCompanies, todos: updatedTodos };
+    });
   };
 
   // ---- SEARCH / FILTER ----
@@ -802,6 +965,25 @@ function SalesPipelineApp() {
     // Assigned filter
     if (companyFilter.assigned === "unassigned") result = result.filter(c => !c.targetWeek);
     else if (companyFilter.assigned === "assigned") result = result.filter(c => !!c.targetWeek);
+
+    // Sort by category and priority: Normal Retail > Low Priority Retail > Other
+    result = result.sort((a, b) => {
+      const aIsOther = a.category === "other";
+      const bIsOther = b.category === "other";
+      const aIsLow = a.priority === "low";
+      const bIsLow = b.priority === "low";
+
+      // Other always at bottom
+      if (aIsOther && !bIsOther) return 1;
+      if (!aIsOther && bIsOther) return -1;
+
+      // Low priority below normal (but above other)
+      if (aIsLow && !bIsLow) return 1;
+      if (!aIsLow && bIsLow) return -1;
+
+      // Same category/priority: sort by name
+      return turkishLower(a.name).localeCompare(turkishLower(b.name), 'tr');
+    });
 
     return result;
   }, [data.companies, data.contacts, searchTerm, companyFilter]);
@@ -854,188 +1036,46 @@ function SalesPipelineApp() {
     return result;
   }, [displayCompanies, displayFollowups, getContacts]);
 
+  const openCompanyDetail = (company) => {
+    setExpandedFirm(company.id);
+  };
+
   const renderCompanyCard = (company, type) => {
     const contacts = getContacts(company.id);
     const hasPhone = contacts.some(c => c.phone);
     const hasAny = contacts.length > 0;
-    const isExpanded = expandedFirm === company.id;
     const statusColor = hasPhone ? colors.green : hasAny ? colors.yellow : colors.red;
     const statusDot = hasPhone ? "🟢" : hasAny ? "🟡" : "🔴";
     const parent = getParentCompany(company.id);
     const parentContacts = parent ? getContacts(parent.id) : [];
-    const logs = getCallLogs(company.id);
 
     return (
-      <div key={company.id} style={{ ...s.card, borderLeft: `3px solid ${statusColor}`, cursor: "pointer" }}>
-        {/* Compact Row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={() => setExpandedFirm(isExpanded ? null : company.id)}>
-          <span style={{ fontSize: 14 }}>{statusDot}</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: 14 }}>{company.name}</span>
-              {parent && <span style={{ fontSize: 11, color: colors.textMuted }}>({parent.name})</span>}
-              <PipelineBadge stage={company.pipeline} />
-              <DeviceBadge status={company.deviceStatus} brand={company.deviceBrand} />
-                    {company.avm && <Badge color={colors.textMuted} bg={colors.surfaceHover}>📍 {company.avm}</Badge>}
-              {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
+      <div key={company.id} style={{ ...s.card, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0 }}>
+        <div onClick={() => openCompanyDetail(company)}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 12 }}>{statusDot}</span>
+              <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={company.name}>{company.name}</span>
             </div>
-            {contacts.length > 0 && (
-              <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 3 }}>
-                {contacts[0].name} — {contacts[0].title} {contacts[0].phone ? `📞 ${contacts[0].phone}` : contacts[0].email ? `✉️ ${contacts[0].email}` : "🔗 LinkedIn"}
-              </div>
-            )}
-            {contacts.length === 0 && parent && parentContacts.length > 0 && (
-              <div style={{ fontSize: 11, color: colors.yellow }}>
-                → Çatı firmada {parentContacts.length} kontakt mevcut
-              </div>
-            )}
-            {contacts.length === 0 && (!parent || parentContacts.length === 0) && (
-              <div style={{ fontSize: 11, color: colors.red }}>Kontakt yok</div>
-            )}
-            {logs.length > 0 && (
-              <div style={{ fontSize: 10, color: colors.textDim, marginTop: 2 }}>
-                Son: {logs[0].notes?.slice(0, 60) || "Not yok"} ({new Date(logs[0].date).toLocaleDateString("tr")})
-              </div>
-            )}
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {hasPhone && <button style={s.btn("success")} onClick={(e) => { e.stopPropagation(); openCallLog(company, contacts.find(c => c.phone) || contacts[0]); }}>📞 Ara</button>}
-            {isExpanded ? <ChevronDown size={18} color={colors.textMuted}/> : <ChevronRight size={18} color={colors.textMuted}/>}
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+            <PipelineBadge stage={company.pipeline} />
+            <DeviceBadge status={company.deviceStatus} brand={company.deviceBrand} />
+            {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
           </div>
+          {parent && <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>↳ {parent.name}</div>}
+          {contacts.length > 0 && (
+            <div style={{ fontSize: 10, color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {contacts[0].name} {contacts[0].phone ? "📞" : contacts[0].email ? "✉️" : "🔗"}
+            </div>
+          )}
+          {contacts.length === 0 && parent && parentContacts.length > 0 && (
+            <div style={{ fontSize: 10, color: colors.yellow }}>Çatı: {parentContacts.length} kontakt</div>
+          )}
+          {contacts.length === 0 && (!parent || parentContacts.length === 0) && (
+            <div style={{ fontSize: 10, color: colors.red }}>Kontakt yok</div>
+          )}
         </div>
-
-        {/* Expanded Card */}
-        {isExpanded && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${colors.border}` }}>
-            {/* Quick Links */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {company.linkedin && <a href={company.linkedin} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}><LinkedinIcon size={14}/> Firma LinkedIn</a>}
-              {company.website && <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}><GlobeIcon size={14}/> Website</a>}
-              <button style={s.btn()} onClick={() => openAddContact(company.id)}><PlusIcon size={14}/> Kontakt Ekle</button>
-              <select style={s.select} value={company.pipeline} onChange={(e) => updateCompanyField(company.id, "pipeline", e.target.value)}>
-                <option value="new_target">Yeni Hedef</option>
-                <option value="searching_contact">Kontakt Aranıyor</option>
-                <option value="contact_ready">Kontakt Hazır</option>
-                <option value="called">Arama Yapıldı</option>
-                <option value="meeting_scheduled">Toplantı Alındı</option>
-                <option value="demo_done">Demo Yapıldı</option>
-                <option value="regular_followup">Düzenli Takip</option>
-                <option value="unreached">Ulaşılamadı</option>
-                <option value="not_interested">İlgilenmiyor</option>
-                <option value="closing">Kapanış</option>
-              </select>
-            </div>
-
-            {/* Editable Company Fields */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: 10, color: colors.textDim }}>LinkedIn URL</label>
-                <input style={s.input} value={company.linkedin || ""} onChange={(e) => updateCompanyField(company.id, "linkedin", e.target.value)} placeholder="Firma LinkedIn URL" />
-              </div>
-              <div>
-                <label style={{ fontSize: 10, color: colors.textDim }}>Website</label>
-                <input style={s.input} value={company.website || ""} onChange={(e) => updateCompanyField(company.id, "website", e.target.value)} placeholder="Firma website" />
-              </div>
-            </div>
-
-            {/* Contacts Table */}
-            <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 6 }}>KONTAKTLAR ({contacts.length})</div>
-            {contacts.length > 0 && (
-              <table style={s.table}>
-                <thead>
-                  <tr>
-                    <th style={s.th}>#</th>
-                    <th style={s.th}>İsim</th>
-                    <th style={s.th}>Ünvan</th>
-                    <th style={s.th}>Telefon</th>
-                    <th style={s.th}>Email</th>
-                    <th style={s.th}>LinkedIn</th>
-                    <th style={s.th}>Profil</th>
-                    <th style={s.th}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contacts.map((ct, idx) => {
-                    const profile = getProfile(ct.id);
-                    return (
-                      <tr key={ct.id} style={{ background: idx === 0 ? "rgba(59,130,246,0.05)" : "transparent" }}>
-                        <td style={s.td}>
-                          <span style={{ fontWeight: 700, color: idx === 0 ? colors.accent : colors.textDim }}>{idx + 1}</span>
-                        </td>
-                        <td style={s.td}>
-                          <input style={{ ...s.input, fontWeight: 600, border: "none", padding: "2px 4px", background: "transparent" }} value={ct.name} onChange={(e) => updateContactField(ct.id, "name", e.target.value)} />
-                        </td>
-                        <td style={s.td}>
-                          <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent" }} value={ct.title || ""} onChange={(e) => updateContactField(ct.id, "title", e.target.value)} />
-                        </td>
-                        <td style={s.td}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: ct.phone ? colors.green : colors.textDim }} value={ct.phone || ""} onChange={(e) => updateContactField(ct.id, "phone", e.target.value)} placeholder="—" />
-                            {ct.phone && <button style={{ ...s.btn("success"), padding: "3px 8px" }} onClick={(e) => { e.stopPropagation(); openCallLog(company, ct); }}>📞</button>}
-                          </div>
-                        </td>
-                        <td style={s.td}>
-                          <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: ct.email ? colors.yellow : colors.textDim }} value={ct.email || ""} onChange={(e) => updateContactField(ct.id, "email", e.target.value)} placeholder="—" />
-                        </td>
-                        <td style={s.td}>
-                          {ct.linkedin ? (
-                            <a href={ct.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, fontSize: 11 }}>Profil ↗</a>
-                          ) : (
-                            <input style={{ ...s.input, border: "none", padding: "2px 4px", background: "transparent", color: colors.textDim }} value="" onChange={(e) => updateContactField(ct.id, "linkedin", e.target.value)} placeholder="URL ekle" />
-                          )}
-                        </td>
-                        <td style={s.td}>
-                          {profile ? (
-                            <span style={{ fontSize: 10, color: colors.green }}>✓ {profile.communication || ""}</span>
-                          ) : (
-                            <span style={{ fontSize: 10, color: colors.textDim }}>—</span>
-                          )}
-                        </td>
-                        <td style={s.td}>
-                          <button style={{ ...s.btn("danger"), padding: "3px 6px" }} onClick={() => deleteContact(ct.id)}><TrashIcon size={12}/></button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-
-            {/* Parent company contacts */}
-            {contacts.length === 0 && parent && parentContacts.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 11, color: colors.yellow, marginBottom: 6 }}>Çatı firma kontaktları ({parent.name}):</div>
-                {parentContacts.map(ct => (
-                  <div key={ct.id} style={{ fontSize: 11, padding: "4px 0", color: colors.textMuted }}>
-                    {ct.name} — {ct.title} {ct.phone && `📞 ${ct.phone}`} {ct.email && `✉️`} {ct.linkedin && "🔗"}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Notes */}
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 10, color: colors.textDim }}>Notlar</label>
-              <textarea style={{ ...s.input, height: 50, resize: "vertical" }} value={company.notes || ""} onChange={(e) => updateCompanyField(company.id, "notes", e.target.value)} placeholder="Firma notları..." />
-            </div>
-
-            {/* Call History */}
-            {logs.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 6 }}>ARAMA GEÇMİŞİ</div>
-                {logs.slice(0, 5).map(log => (
-                  <div key={log.id} style={{ fontSize: 11, padding: "4px 0", borderBottom: `1px solid ${colors.border}`, display: "flex", gap: 8 }}>
-                    <span style={{ color: colors.textDim, minWidth: 70 }}>{new Date(log.date).toLocaleDateString("tr")}</span>
-                    <Badge color={log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red} bg={log.result === "meeting" ? colors.greenDim : log.result === "introduced" ? colors.yellowDim : colors.redDim}>
-                      {log.result === "meeting" ? "Toplantı" : log.result === "introduced" ? "Tanışıldı" : log.result === "unreached" ? "Ulaşılamadı" : log.result === "not_interested" ? "İlgilenmiyor" : log.result}
-                    </Badge>
-                    <span style={{ color: colors.textMuted }}>{log.notes}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     );
   };
@@ -1081,48 +1121,39 @@ function SalesPipelineApp() {
         ))}
       </div>
 
-      {/* FOLLOWUP FILTER VIEW */}
-      {weekFilter === "followup" ? (
+      {/* TWO COLUMN LAYOUT: Hedef (left) + Düzenli Takip (right) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 20 }}>
+        {/* LEFT: Hedef Firmalar */}
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: colors.orange, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            🔄 Düzenli Takip Firmaları ({displayFollowups.length})
-            <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted }}>— en uzun süredir aranmayan en üstte</span>
-          </div>
-          {displayFollowups.length === 0 ? (
-            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>Düzenli takipte firma yok.</div>
-          ) : displayFollowups.map(c => renderCompanyCard(c, "followup"))}
-        </div>
-      ) : (
-        /* DEFAULT / FILTERED VIEW */
-        <div>
-          {/* Section: Hedef Firmalar */}
           <div style={{ fontSize: 14, fontWeight: 700, color: colors.accent, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            🎯 {weekFilter === "all" ? "Hedef Firmalar" : weekFilter === "ready" ? "Aramaya Hazır Firmalar" : "Kontakt Eksik Firmalar"} ({displayCompanies.length})
+            🎯 Hedef Firmalar ({displayCompanies.length})
             {weekFilter !== "all" && (
-              <button style={{ ...s.btn(), padding: "2px 8px", fontSize: 10 }} onClick={() => setWeekFilter("all")}>✕ Filtreyi kaldır</button>
+              <button style={{ ...s.btn(), padding: "2px 8px", fontSize: 10 }} onClick={() => setWeekFilter("all")}>✕</button>
             )}
           </div>
-
           {displayCompanies.length === 0 ? (
-            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
-              {weekFilter === "all" ? "Bu haftada henüz firma yok. Üstteki butonlardan firma ekle veya Excel yükle." :
-               weekFilter === "ready" ? "Bu haftada aramaya hazır firma yok." :
-               "Bu haftada kontakt eksik firma yok."}
+            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 20, fontSize: 12 }}>Bu haftada henüz firma yok.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+              {displayCompanies.map(c => renderCompanyCard(c, "target"))}
             </div>
-          ) : displayCompanies.map(c => renderCompanyCard(c, "target"))}
-
-          {/* Section: Düzenli Takip (always visible when filter is "all") */}
-          {weekFilter === "all" && allFollowups.length > 0 && (
-            <>
-              <div style={{ fontSize: 14, fontWeight: 700, color: colors.orange, marginTop: 24, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                🔄 Düzenli Takip ({allFollowups.length})
-                <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted }}>— arama ritmi: 1 takip, 1 yeni hedef</span>
-              </div>
-              {displayFollowups.map(c => renderCompanyCard(c, "followup"))}
-            </>
           )}
         </div>
-      )}
+
+        {/* RIGHT: Düzenli Takip */}
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: colors.orange, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            🔄 Düzenli Takip ({allFollowups.length})
+          </div>
+          {allFollowups.length === 0 ? (
+            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 20, fontSize: 12 }}>Düzenli takipte firma yok.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+              {displayFollowups.map(c => renderCompanyCard(c, "followup"))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -1268,31 +1299,20 @@ function SalesPipelineApp() {
           ))}
         </div>
 
-        {/* Hedef Haftaya Atama Barı */}
-        <div style={{ ...s.card, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, background: colors.accentDim, border: `1px solid ${colors.accent}30` }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: colors.accent }}>Hedef Haftaya Ata:</span>
-          <button style={s.btn(assignWeek === currentWeek ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek)}>Bu Hafta ({currentWeek})</button>
-          <button style={s.btn(assignWeek === currentWeek + 1 ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek + 1)}>Sonraki ({currentWeek + 1})</button>
-          <button style={s.btn(assignWeek === currentWeek + 2 ? "primary" : "default")} onClick={() => setAssignWeek(currentWeek + 2)}>+2 ({currentWeek + 2})</button>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 11, color: colors.textMuted }}>Özel:</span>
-            <input type="number" style={{ ...s.input, width: 60, padding: "4px 8px" }} value={assignWeek} onChange={(e) => setAssignWeek(parseInt(e.target.value) || currentWeek)} min={1} max={53} />
-          </div>
-          <span style={{ fontSize: 10, color: colors.textDim }}>{getWeekDates(assignWeek).label}</span>
-        </div>
-
         {/* Table */}
         <div style={{ overflowX: "auto" }}>
           <table style={{ ...s.table, tableLayout: "fixed", width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ ...s.th, width: "20%" }}>Firma</th>
-                <th style={{ ...s.th, width: "15%" }}>Çatı</th>
-                <th style={{ ...s.th, width: "12%" }}>Cihaz</th>
-                <th style={{ ...s.th, width: "12%" }}>Pipeline</th>
-                <th style={{ ...s.th, width: "12%" }}>Kontakt</th>
+                <th style={{ ...s.th, width: "18%" }}>Firma</th>
+                <th style={{ ...s.th, width: "12%" }}>Çatı</th>
+                <th style={{ ...s.th, width: "10%" }}>Cihaz</th>
+                <th style={{ ...s.th, width: "10%" }}>Pipeline</th>
+                <th style={{ ...s.th, width: "10%" }}>Kontakt</th>
                 <th style={{ ...s.th, width: "10%" }}>Hafta</th>
-                <th style={{ ...s.th, width: "12%" }}>Hedef Ata</th>
+                <th style={{ ...s.th, width: "8%" }}>Takip</th>
+                <th style={{ ...s.th, width: "8%" }}>Kategori</th>
+                <th style={{ ...s.th, width: "8%" }}>Öncelik</th>
               </tr>
             </thead>
             <tbody>
@@ -1312,8 +1332,9 @@ function SalesPipelineApp() {
                     </td>
                     <td style={s.td}>
                       <select
-                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", minWidth: 100, color: c.isParent ? colors.purple : c.parentId ? colors.purple : colors.textDim, background: "transparent", border: `1px solid ${colors.border}` }}
+                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", width: 80, color: c.isParent ? colors.purple : c.parentId ? colors.purple : colors.textDim, background: "transparent", border: `1px solid ${colors.border}` }}
                         value={c.isParent ? "_self" : c.parentId || ""}
+                        title={c.isParent ? "Kendisi çatı" : c.parentId ? (data.companies.find(p => p.id === c.parentId)?.name || "") : "Yok"}
                         onChange={(e) => {
                           const val = e.target.value;
                           if (val === "_self") {
@@ -1346,20 +1367,58 @@ function SalesPipelineApp() {
                       </div>
                     </td>
                     <td style={s.td}>
-                      {c.targetWeek ? (
-                        <Badge color={colors.accent} bg={colors.accentDim}>H{c.targetWeek}</Badge>
-                      ) : (
-                        <span style={{ color: colors.textDim, fontSize: 11 }}>—</span>
-                      )}
+                      <select
+                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", background: c.targetWeek ? colors.accentDim : "transparent", color: c.targetWeek ? colors.accent : colors.textDim }}
+                        value={c.targetWeek || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === "") {
+                            updateCompanyField(c.id, "targetWeek", null);
+                          } else {
+                            updateCompanyField(c.id, "targetWeek", parseInt(val));
+                            updateCompanyField(c.id, "targetYear", currentYear);
+                          }
+                        }}
+                      >
+                        <option value="">—</option>
+                        <option value={currentWeek}>H{currentWeek} (Bu)</option>
+                        <option value={currentWeek + 1}>H{currentWeek + 1}</option>
+                        <option value={currentWeek + 2}>H{currentWeek + 2}</option>
+                      </select>
                     </td>
                     <td style={s.td}>
                       <button
-                        style={{ ...s.btn("primary"), padding: "3px 10px", fontSize: 11 }}
-                        onClick={() => assignToWeek(c.id, assignWeek)}
-                        title={`Hafta ${assignWeek}'e ata (${getWeekDates(assignWeek).label})`}
+                        style={{
+                          ...s.btn(c.pipeline === "regular_followup" ? "success" : "default"),
+                          padding: "3px 10px",
+                          fontSize: 11
+                        }}
+                        onClick={() => updateCompanyField(c.id, "pipeline", c.pipeline === "regular_followup" ? "new_target" : "regular_followup")}
+                        title={c.pipeline === "regular_followup" ? "Düzenli takipten çıkar" : "Düzenli takibe ekle"}
                       >
-                        → H{assignWeek}
+                        {c.pipeline === "regular_followup" ? "✓ Takipte" : "+ Takip"}
                       </button>
+                    </td>
+                    <td style={s.td}>
+                      <select
+                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", background: c.category === "other" ? colors.redDim : c.category === "health" ? colors.greenDim : "transparent", color: c.category === "other" ? colors.red : c.category === "health" ? colors.green : colors.textMuted }}
+                        value={c.category || "retail"}
+                        onChange={(e) => updateCompanyField(c.id, "category", e.target.value)}
+                      >
+                        <option value="retail">Perakende</option>
+                        <option value="health">Sağlık</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </td>
+                    <td style={s.td}>
+                      <select
+                        style={{ ...s.select, fontSize: 11, padding: "3px 6px", background: c.priority === "low" ? colors.yellowDim : "transparent", color: c.priority === "low" ? colors.yellow : colors.textMuted }}
+                        value={c.priority || "normal"}
+                        onChange={(e) => updateCompanyField(c.id, "priority", e.target.value)}
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="low">Düşük</option>
+                      </select>
                     </td>
                   </tr>
                 );
@@ -1445,15 +1504,37 @@ function SalesPipelineApp() {
 
     // Combine auto + manual todos
     const manualTodos = data.todos || [];
-    const allTodos = [...autoTodos, ...manualTodos].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+    const allTodos = [...autoTodos, ...manualTodos].filter(t => !t.done);
 
-    const categories = { kontakt: "🔍 Kontakt", arama: "📞 Arama", takip: "🔄 Takip", toplantı: "📅 Toplantı", genel: "📌 Genel" };
-    const grouped = {};
-    allTodos.forEach(t => {
-      const cat = t.category || "genel";
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(t);
+    // Separate: with targetWeek vs without
+    const withWeek = allTodos.filter(t => t.targetWeek).sort((a, b) => {
+      // Sort by week ascending (earlier weeks first)
+      if (a.targetWeek !== b.targetWeek) return a.targetWeek - b.targetWeek;
+      // Then by date
+      if (a.targetDate && b.targetDate && a.targetDate !== b.targetDate) {
+        return a.targetDate.localeCompare(b.targetDate);
+      }
+      return (a.priority || 99) - (b.priority || 99);
     });
+
+    const withoutWeek = allTodos.filter(t => !t.targetWeek).sort((a, b) => {
+      // Sort by createdAt descending (newest first)
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    const doneTodos = manualTodos.filter(t => t.done);
+
+    // Group by week - dated ones first, then unassigned
+    const byWeek = {};
+    withWeek.forEach(t => {
+      if (!byWeek[t.targetWeek]) byWeek[t.targetWeek] = [];
+      byWeek[t.targetWeek].push(t);
+    });
+    if (withoutWeek.length > 0) {
+      byWeek["unassigned"] = withoutWeek;
+    }
 
     return (
       <div>
@@ -1465,37 +1546,192 @@ function SalesPipelineApp() {
           }}><PlusIcon size={14}/> Ekle</button>
         </div>
 
-        {Object.entries(grouped).map(([cat, items]) => (
-          <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>{categories[cat] || cat} ({items.length})</div>
-            {items.map(todo => (
-              <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, opacity: todo.done ? 0.4 : 1 }}>
-                {todo.type === "manual" && (
-                  <input type="checkbox" checked={todo.done || false} onChange={() => {
-                    updateData(prev => ({
-                      ...prev,
-                      todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: !t.done } : t)
-                    }));
-                  }} />
-                )}
-                <span style={{ fontSize: 10, color: todo.priority <= 1 ? colors.red : todo.priority <= 2 ? colors.orange : colors.textDim, fontWeight: 700, minWidth: 16 }}>
-                  {todo.priority <= 1 ? "!" : todo.priority <= 2 ? "•" : ""}
+        {Object.entries(byWeek)
+          .sort((a, b) => {
+            if (a[0] === "unassigned") return 1;
+            if (b[0] === "unassigned") return -1;
+            return parseInt(a[0]) - parseInt(b[0]);
+          })
+          .map(([week, items]) => (
+            <div key={week} style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: week === "unassigned" ? colors.textDim : week == currentWeek ? colors.green : colors.accent, marginBottom: 8 }}>
+                {week === "unassigned" ? "📌 Hafta Atanmamış" : `📅 Hafta ${week}${week == currentWeek ? " (Bu Hafta)" : ""}`} ({items.length})
+              </div>
+              {items.map(todo => {
+                const dateStr = todo.targetDate ? new Date(todo.targetDate).toLocaleDateString("tr", { day: "numeric", month: "short" }) : null;
+                const isToday = todo.targetDate === new Date().toISOString().split("T")[0];
+                return (
+                  <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    {todo.type === "manual" && (
+                      <input type="checkbox" checked={false} onChange={() => {
+                        updateData(prev => ({
+                          ...prev,
+                          todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: true } : t)
+                        }));
+                      }} />
+                    )}
+                    <span style={{ fontSize: 10, color: todo.priority <= 1 ? colors.red : todo.priority <= 2 ? colors.orange : colors.textDim, fontWeight: 700, minWidth: 16 }}>
+                      {todo.priority <= 1 ? "!" : todo.priority <= 2 ? "•" : ""}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 12 }}>{todo.text}</span>
+                    {todo.profileKey && <Badge color={colors.yellow} bg={colors.yellowDim}>❓</Badge>}
+                    {todo.type === "auto" && <Badge color={colors.textDim} bg={colors.surfaceHover}>otomatik</Badge>}
+                    {todo.type === "manual" && (
+                      <>
+                        {/* Show date badge if date is set, otherwise show week picker */}
+                        {todo.targetDate ? (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: isToday ? colors.green : colors.accent, background: isToday ? colors.greenDim : colors.accentDim, padding: "3px 8px", borderRadius: 4 }}>
+                            📅 {isToday ? "Bugün" : dateStr}
+                          </span>
+                        ) : (
+                          <select
+                            style={{ ...s.select, fontSize: 10, padding: "2px 4px", width: 55, background: todo.targetWeek ? colors.accentDim : "transparent", color: todo.targetWeek ? colors.accent : colors.textDim }}
+                            value={todo.targetWeek || ""}
+                            onChange={(e) => {
+                              const newWeek = e.target.value ? parseInt(e.target.value) : null;
+                              updateData(prev => ({
+                                ...prev,
+                                todos: prev.todos.map(t => t.id === todo.id ? { ...t, targetWeek: newWeek, targetYear: newWeek ? currentYear : null } : t)
+                              }));
+                            }}
+                          >
+                            <option value="">—</option>
+                            {[...Array(8)].map((_, i) => <option key={i} value={currentWeek + i}>H{currentWeek + i}</option>)}
+                          </select>
+                        )}
+                        <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => {
+                          updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }));
+                        }}><TrashIcon size={10}/></button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+        {/* Tamamlananlar */}
+        {doneTodos.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.green, marginBottom: 8 }}>✅ Tamamlanan ({doneTodos.length})</div>
+            {doneTodos.slice(0, 10).map(todo => (
+              <div key={todo.id} style={{ ...s.card, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, opacity: 0.5, marginBottom: 4 }}>
+                <input type="checkbox" checked={true} onChange={() => {
+                  updateData(prev => ({
+                    ...prev,
+                    todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: false } : t)
+                  }));
+                }} />
+                <span style={{ flex: 1, fontSize: 12, textDecoration: "line-through" }}>{todo.text}</span>
+                <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => {
+                  updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }));
+                }}><TrashIcon size={10}/></button>
+              </div>
+            ))}
+            {doneTodos.length > 10 && <div style={{ fontSize: 11, color: colors.textDim, marginTop: 4 }}>+{doneTodos.length - 10} daha...</div>}
+          </div>
+        )}
+
+        {allTodos.length === 0 && (
+          <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
+            Yapılacak bir şey yok! Firma ve kontakt eklediğinde otomatik to-do'lar oluşacak.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================
+  // ACTIONS PAGE
+  // ============================================================
+
+  const renderActions = () => {
+    // Collect all actions from different sources
+    const actions = [];
+
+    // 1. Call logs - each call is an action
+    data.callLogs.forEach(log => {
+      const company = data.companies.find(c => c.id === log.companyId);
+      const contact = data.contacts.find(c => c.id === log.contactId);
+      const resultLabels = {
+        meeting: "✅ Toplantı Alındı",
+        introduced: "🤝 Ulaşıldı",
+        has_device: "🔴 Cihaz Var",
+        unreached: "❌ Ulaşılamadı",
+        wrong_number: "⚠️ Yanlış Numara",
+        not_interested: "🚫 İlgilenmiyor"
+      };
+      actions.push({
+        id: log.id,
+        type: "call",
+        date: log.date,
+        icon: "📞",
+        text: `${contact?.name || "Kontakt"} arandı`,
+        detail: resultLabels[log.result] || log.result,
+        company: company?.name || "",
+        result: log.result
+      });
+    });
+
+    // 2. Completed todos - each completed todo is an action
+    (data.todos || []).filter(t => t.done).forEach(todo => {
+      actions.push({
+        id: `todo-${todo.id}`,
+        type: "todo",
+        date: todo.completedAt || todo.createdAt,
+        icon: "✅",
+        text: todo.text,
+        detail: "To-Do tamamlandı",
+        company: todo.company || ""
+      });
+    });
+
+    // Sort by date descending (newest first)
+    actions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Group by date
+    const byDate = {};
+    actions.forEach(action => {
+      const dateKey = new Date(action.date).toLocaleDateString("tr", { day: "numeric", month: "long", year: "numeric" });
+      if (!byDate[dateKey]) byDate[dateKey] = [];
+      byDate[dateKey].push(action);
+    });
+
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Aksiyonlar ({actions.length})</div>
+        </div>
+
+        {Object.entries(byDate).map(([date, items]) => (
+          <div key={date} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.accent, marginBottom: 8, borderBottom: `1px solid ${colors.border}`, paddingBottom: 4 }}>
+              📅 {date} ({items.length} aksiyon)
+            </div>
+            {items.map(action => (
+              <div key={action.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                <span style={{ fontSize: 16 }}>{action.icon}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{action.text}</div>
+                  {action.company && <div style={{ fontSize: 10, color: colors.textDim }}>{action.company}</div>}
+                </div>
+                <Badge
+                  color={action.result === "meeting" ? colors.green : action.result === "introduced" ? colors.yellow : action.result === "unreached" ? colors.red : colors.textDim}
+                  bg={action.result === "meeting" ? colors.greenDim : action.result === "introduced" ? colors.yellowDim : action.result === "unreached" ? colors.redDim : colors.surfaceHover}
+                >
+                  {action.detail}
+                </Badge>
+                <span style={{ fontSize: 10, color: colors.textDim }}>
+                  {new Date(action.date).toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <span style={{ flex: 1, fontSize: 12, textDecoration: todo.done ? "line-through" : "none" }}>{todo.text}</span>
-                {todo.type === "auto" && <Badge color={colors.textDim} bg={colors.surfaceHover}>otomatik</Badge>}
-                {todo.type === "manual" && (
-                  <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => {
-                    updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }));
-                  }}><TrashIcon size={10}/></button>
-                )}
               </div>
             ))}
           </div>
         ))}
 
-        {allTodos.length === 0 && (
+        {actions.length === 0 && (
           <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
-            Yapılacak bir şey yok! Firma ve kontakt eklediğinde otomatik to-do'lar oluşacak.
+            Henüz aksiyon yok. Arama yaptıkça ve to-do'ları tamamladıkça burada görünecek.
           </div>
         )}
       </div>
@@ -1516,30 +1752,29 @@ function SalesPipelineApp() {
               <div style={{ fontWeight: 700, fontSize: 15 }}>
                 Excel Önizleme — {importType === "lusha" ? "Lusha Kontakt" : "AVM Analiz"} ({importPreview.rows.length} satır{importPreview.fileCount > 1 ? `, ${importPreview.fileCount} dosya` : ""})
               </div>
-              <button style={s.btn("danger")} onClick={() => setImportPreview(null)}><XIcon size={14}/></button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button style={s.btn("primary")} onClick={() => importType === "lusha" ? processLushaImport(importPreview) : processAVMImport(importPreview)}>
+                  <CheckIcon size={14}/> İçe Aktar ({importPreview.rows.length} satır)
+                </button>
+                <button style={s.btn()} onClick={() => setImportPreview(null)}>İptal</button>
+                <button style={s.btn("danger")} onClick={() => setImportPreview(null)}><XIcon size={14}/></button>
+              </div>
             </div>
 
-            <div style={{ overflowX: "auto", marginBottom: 16, maxHeight: 400, overflowY: "auto" }}>
-              <table style={s.table}>
-                <thead>
-                  <tr>{importPreview.headers.map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+            <div style={{ overflowX: "auto", marginBottom: 16, maxHeight: 500, overflowY: "auto" }}>
+              <table style={{ ...s.table, minWidth: 1500 }}>
+                <thead style={{ position: "sticky", top: 0, background: colors.surface }}>
+                  <tr>{importPreview.headers.map(h => <th key={h} style={{ ...s.th, whiteSpace: "nowrap" }}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {importPreview.rows.slice(0, 50).map((row, i) => (
                     <tr key={i}>
-                      {importPreview.headers.map(h => <td key={h} style={s.td}>{row[h]}</td>)}
+                      {importPreview.headers.map(h => <td key={h} style={{ ...s.td, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row[h]}</td>)}
                     </tr>
                   ))}
                 </tbody>
               </table>
               {importPreview.rows.length > 50 && <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 8 }}>...ve {importPreview.rows.length - 50} satır daha</div>}
-            </div>
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={s.btn("primary")} onClick={() => importType === "lusha" ? processLushaImport(importPreview) : processAVMImport(importPreview)}>
-                <CheckIcon size={14}/> İçe Aktar ({importPreview.rows.length} satır)
-              </button>
-              <button style={s.btn()} onClick={() => setImportPreview(null)}>İptal</button>
             </div>
           </div>
         </div>
@@ -1646,63 +1881,29 @@ function SalesPipelineApp() {
         </div>
       )}
 
-      {/* Call Log Modal */}
-      {showModal === "callLog" && callResult && (
-        <div style={s.modal} onClick={() => { setShowModal(null); setCallResult(null); }}>
-          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Arama Notu</div>
-            <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>{callResult.companyName} → {callResult.contactName}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div>
-                <label style={{ fontSize: 11, color: colors.textMuted }}>Sonuç *</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {[
-                    { value: "meeting", label: "✅ Toplantı Alındı", color: colors.green },
-                    { value: "introduced", label: "🤝 Tanışıldı", color: colors.yellow },
-                    { value: "unreached", label: "❌ Ulaşılamadı", color: colors.red },
-                    { value: "wrong_number", label: "⚠️ Yanlış Numara", color: colors.orange },
-                    { value: "not_interested", label: "🚫 İlgilenmiyor", color: colors.textDim },
-                  ].map(opt => (
-                    <button key={opt.value} style={{ ...s.btn(callResult.result === opt.value ? "primary" : "default"), borderColor: opt.color }} onClick={() => setCallResult({ ...callResult, result: opt.value })}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {callResult.result === "meeting" && (
-                <div>
-                  <label style={{ fontSize: 11, color: colors.textMuted }}>Toplantı Tarihi</label>
-                  <input type="date" style={s.input} value={callResult.meetingDate || ""} onChange={e => setCallResult({ ...callResult, meetingDate: e.target.value })} />
-                </div>
-              )}
-              <div>
-                <label style={{ fontSize: 11, color: colors.textMuted }}>Notlar</label>
-                <textarea style={{ ...s.input, height: 80 }} value={callResult.notes || ""} onChange={e => setCallResult({ ...callResult, notes: e.target.value })} placeholder="Görüşme notlarını yaz..." />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <button style={s.btn("primary")} onClick={saveCallLog} disabled={!callResult.result}>Kaydet ve Profil Doldur →</button>
-              <button style={s.btn()} onClick={() => { setShowModal(null); setCallResult(null); }}>İptal</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Character Profile Modal */}
+      {/* Character Profile Side Panel */}
       {showModal === "charProfile" && callResult && (
-        <div style={s.modal} onClick={() => { setShowModal(null); setCallResult(null); }}>
-          <div style={s.modalContent} onClick={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Karakter Profili</div>
-            <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>{callResult.contactName} — bu bilgiler sonraki aramalarda sana rehber olacak</div>
+        <>
+          <div style={s.sidePanelBackdrop} onClick={() => { setShowModal(null); setCallResult(null); }} />
+          <div style={s.sidePanel}>
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>👤 Karakter Profili</div>
+                <div style={{ fontSize: 12, color: colors.textMuted }}>{callResult.contactName} — {callResult.companyName}</div>
+              </div>
+              <button style={s.btn("danger")} onClick={() => { setShowModal(null); setCallResult(null); }}><XIcon size={16}/></button>
+            </div>
+            <div style={s.sidePanelContent}>
+            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 12 }}>Bu bilgiler sonraki aramalarda sana rehber olacak</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {[
-                { key: "communication", label: "İletişim tarzı nasıldı?", options: ["Resmi", "Samimi", "Kısa-net", "Çok konuşkan"] },
-                { key: "decisionAuth", label: "Karar verme yetkisi?", options: ["Tek karar verici", "Üstüne danışacak", "Komite kararı", "Belirsiz"] },
-                { key: "decisionSpeed", label: "Karar verme hızı?", options: ["Hızlı", "Yavaş/düşünür", "Erteleyici"] },
-                { key: "arguments", label: "Ne tür argümanlara açık?", options: ["Maliyet", "Teknoloji", "Referans/kanıt", "ROI", "Marka"] },
-                { key: "competitorOpinion", label: "Rakip hakkında ne düşünüyor?", options: ["Memnun", "Şikayetçi", "Nötr", "Bilgisi yok"] },
-                { key: "priceSensitivity", label: "Fiyat hassasiyeti?", options: ["Çok hassas", "Makul", "Değer önemli"] },
-                { key: "urgency", label: "Aciliyeti var mı?", options: ["Acil", "Planlı bütçe", "Acele yok", "Bilgi topluyor"] },
+                { key: "communication", label: "İletişim tarzı nasıldı?", options: ["Resmi", "Samimi", "Kısa-net", "Çok konuşkan", "Sorulmadı"] },
+                { key: "decisionAuth", label: "Karar verme yetkisi?", options: ["Tek karar verici", "Üstüne danışacak", "Komite kararı", "Belirsiz", "Sorulmadı"] },
+                { key: "decisionSpeed", label: "Karar verme hızı?", options: ["Hızlı", "Yavaş/düşünür", "Erteleyici", "Sorulmadı"] },
+                { key: "arguments", label: "Ne tür argümanlara açık?", options: ["Maliyet", "Teknoloji", "Referans/kanıt", "ROI", "Marka", "Sorulmadı"] },
+                { key: "competitorOpinion", label: "Rakip hakkında ne düşünüyor?", options: ["Memnun", "Şikayetçi", "Nötr", "Bilgisi yok", "Sorulmadı"] },
+                { key: "priceSensitivity", label: "Fiyat hassasiyeti?", options: ["Çok hassas", "Makul", "Değer önemli", "Sorulmadı"] },
+                { key: "urgency", label: "Aciliyeti var mı?", options: ["Acil", "Planlı bütçe", "Acele yok", "Bilgi topluyor", "Sorulmadı"] },
               ].map(field => (
                 <div key={field.key}>
                   <label style={{ fontSize: 11, color: colors.textMuted }}>{field.label}</label>
@@ -1716,19 +1917,645 @@ function SalesPipelineApp() {
                 </div>
               ))}
               <div>
-                <label style={{ fontSize: 11, color: colors.textMuted }}>Kişisel gözlemler (en değerli alan!)</label>
+                <label style={{ fontSize: 11, color: colors.textMuted }}>Kişisel gözlemler</label>
                 <textarea style={{ ...s.input, height: 60 }} value={charProfile.personalNotes || ""} onChange={e => setCharProfile({ ...charProfile, personalNotes: e.target.value })} placeholder="futbol sever, sabah aramaları tercih ediyor, asistanı üzerinden iletiyor..." />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: colors.yellow }}>⚠️ Sonraki aramada sor (hatırlatıcı)</label>
+                <textarea style={{ ...s.input, height: 50, borderColor: colors.yellow }} value={charProfile.nextCallAsk || ""} onChange={e => setCharProfile({ ...charProfile, nextCallAsk: e.target.value })} placeholder="neden istemediklerini sor, fiyat hassasiyetini öğren, karar verici kim..." />
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button style={s.btn("primary")} onClick={saveCharProfile}>Kaydet</button>
               <button style={s.btn()} onClick={() => { setShowModal(null); setCallResult(null); }}>Atla</button>
             </div>
+            </div>
           </div>
-        </div>
+        </>
       )}
+
+      {/* Contact Profile Modal */}
+      {showModal === "contactProfile" && selectedContact && (() => {
+        // Use fresh contact data from state (not stale selectedContact)
+        const ct = data.contacts.find(c => c.id === selectedContact.id) || selectedContact;
+        const company = data.companies.find(c => c.id === ct.companyId);
+        const profile = getProfile(ct.id);
+        const contactLogs = data.callLogs?.filter(l => l.contactId === ct.id) || [];
+
+        return (
+          <div style={s.modal} onClick={() => { setShowModal(null); setSelectedContact(null); }}>
+            <div style={{ ...s.modalContent, maxWidth: 700, width: "95vw", maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 18 }}>{ct.name}</div>
+                  <div style={{ fontSize: 12, color: colors.textMuted }}>{ct.title} — {company?.name}</div>
+                </div>
+                <button style={s.btn("danger")} onClick={() => { setShowModal(null); setSelectedContact(null); }}><XIcon size={16}/></button>
+              </div>
+
+              {/* Contact Info */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>Telefon 1</label>
+                  <input style={s.input} value={ct.phone || ""} onChange={(e) => updateContactField(ct.id, "phone", e.target.value)} placeholder="—" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>Telefon 2</label>
+                  <input style={s.input} value={ct.phone2 || ""} onChange={(e) => updateContactField(ct.id, "phone2", e.target.value)} placeholder="—" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>Email</label>
+                  <input style={s.input} value={ct.email || ""} onChange={(e) => updateContactField(ct.id, "email", e.target.value)} placeholder="—" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>LinkedIn</label>
+                  <input style={s.input} value={ct.linkedin || ""} onChange={(e) => updateContactField(ct.id, "linkedin", e.target.value)} placeholder="—" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>Öncelik</label>
+                  <select style={s.select} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
+                    <option value="">—</option>
+                    <option value={1}>1 - En Yüksek</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5 - En Düşük</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: colors.textDim }}>Takip Sıklığı (gün)</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      style={{ ...s.input, width: 60 }}
+                      value={ct.followUpDays || ""}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, "");
+                        updateContactField(ct.id, "followUpDays", val ? parseInt(val) : null);
+                      }}
+                      placeholder="30"
+                    />
+                    {ct.followUpDays && (() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + ct.followUpDays);
+                      const week = getWeekNumber(d);
+                      return (
+                        <span style={{ fontSize: 12, fontWeight: 600, color: colors.accent, background: colors.accentDim, padding: "4px 8px", borderRadius: 4 }}>
+                          → H{week}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Call Buttons */}
+              {(ct.phone || ct.phone2) && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  {ct.phone && (
+                    <button
+                      style={{ ...s.btn("success"), flex: 1, padding: "10px" }}
+                      onClick={() => { setSelectedContact(null); openCallLog(company, ct); }}
+                    >
+                      📞 Tel 1: {ct.phone}
+                    </button>
+                  )}
+                  {ct.phone2 && (
+                    <button
+                      style={{ ...s.btn("success"), flex: 1, padding: "10px" }}
+                      onClick={() => { setSelectedContact(null); openCallLog(company, { ...ct, phone: ct.phone2 }); }}
+                    >
+                      📞 Tel 2: {ct.phone2}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Next Call Reminder */}
+              {profile?.nextCallAsk && (
+                <div style={{ ...s.card, marginBottom: 16, borderColor: colors.yellow, borderWidth: 2 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: colors.yellow, marginBottom: 6 }}>⚠️ SONRAKİ ARAMADA SOR</div>
+                  <div style={{ fontSize: 12, color: colors.text }}>{profile.nextCallAsk}</div>
+                </div>
+              )}
+
+              {/* Character Profile */}
+              <div style={{ ...s.card, marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: colors.textMuted }}>KARAKTERİSTİK PROFİL</div>
+                  <button
+                    style={{ ...s.btn("primary"), fontSize: 11, padding: "4px 10px" }}
+                    onClick={() => {
+                      // Pre-fill with existing profile or empty
+                      const existingProfile = profile || {};
+                      setCharProfile({
+                        communication: existingProfile.communication || "",
+                        decisionAuth: existingProfile.decisionAuth || "",
+                        decisionSpeed: existingProfile.decisionSpeed || "",
+                        arguments: existingProfile.arguments || "",
+                        competitorOpinion: existingProfile.competitorOpinion || "",
+                        priceSensitivity: existingProfile.priceSensitivity || "",
+                        urgency: existingProfile.urgency || "",
+                        personalNotes: existingProfile.personalNotes || "",
+                        nextCallAsk: existingProfile.nextCallAsk || ""
+                      });
+                      setCallResult({
+                        contactId: ct.id,
+                        contactName: ct.name,
+                        companyId: ct.companyId,
+                        companyName: company?.name
+                      });
+                      setShowModal("charProfile");
+                      setSelectedContact(null);
+                    }}
+                  >
+                    ✏️ Düzenle
+                  </button>
+                </div>
+                {profile ? (
+                  <div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                      {profile.communication && profile.communication !== "Sorulmadı" && (
+                        <Badge color={colors.accent} bg={colors.accentDim}>💬 {profile.communication}</Badge>
+                      )}
+                      {profile.decisionAuth && profile.decisionAuth !== "Sorulmadı" && (
+                        <Badge color={colors.purple} bg="#2d1a4e">👤 {profile.decisionAuth}</Badge>
+                      )}
+                      {profile.decisionSpeed && profile.decisionSpeed !== "Sorulmadı" && (
+                        <Badge color={colors.green} bg={colors.greenDim}>⚡ {profile.decisionSpeed}</Badge>
+                      )}
+                      {profile.arguments && profile.arguments !== "Sorulmadı" && (
+                        <Badge color={colors.orange} bg="#3d1e08">💡 {profile.arguments}</Badge>
+                      )}
+                      {profile.competitorOpinion && profile.competitorOpinion !== "Sorulmadı" && (
+                        <Badge color={colors.red} bg={colors.redDim}>🏢 Rakip: {profile.competitorOpinion}</Badge>
+                      )}
+                      {profile.priceSensitivity && profile.priceSensitivity !== "Sorulmadı" && (
+                        <Badge color={colors.green} bg={colors.greenDim}>💰 {profile.priceSensitivity}</Badge>
+                      )}
+                      {profile.urgency && profile.urgency !== "Sorulmadı" && (
+                        <Badge color={colors.red} bg={colors.redDim}>🔥 {profile.urgency}</Badge>
+                      )}
+                    </div>
+                    {profile.personalNotes && (
+                      <div style={{ padding: 10, background: colors.surfaceHover, borderRadius: 6, fontSize: 12 }}>
+                        <div style={{ color: colors.textDim, marginBottom: 4 }}>📝 Notlar:</div>
+                        <div style={{ color: colors.text }}>{profile.personalNotes}</div>
+                      </div>
+                    )}
+                    {profile.updatedAt && (
+                      <div style={{ fontSize: 10, color: colors.textDim, marginTop: 8 }}>Son güncelleme: {new Date(profile.updatedAt).toLocaleDateString("tr")}</div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ color: colors.textDim, fontSize: 12 }}>Henüz profil bilgisi yok. Düzenle butonuna tıklayarak başla.</div>
+                )}
+              </div>
+
+              {/* Call History */}
+              <div style={{ ...s.card }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: colors.textMuted, marginBottom: 10 }}>ARAMA GEÇMİŞİ ({contactLogs.length})</div>
+                {contactLogs.length === 0 ? (
+                  <div style={{ color: colors.textDim, fontSize: 12 }}>Henüz arama kaydı yok.</div>
+                ) : (
+                  contactLogs.map(log => (
+                    <div key={log.id} style={{ fontSize: 12, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                        <span style={{ color: colors.textDim }}>{new Date(log.date).toLocaleDateString("tr")}</span>
+                        <Badge color={log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red} bg={log.result === "meeting" ? colors.greenDim : log.result === "introduced" ? colors.yellowDim : colors.redDim}>
+                          {log.result === "meeting" ? "Toplantı" : log.result === "introduced" ? "Ulaşıldı" : log.result === "unreached" ? "Ulaşılamadı" : log.result === "not_interested" ? "İlgilenmiyor" : log.result}
+                        </Badge>
+                      </div>
+                      {log.notes && <div style={{ color: colors.textMuted }}>{log.notes}</div>}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Contact To-Dos */}
+              <div style={{ ...s.card, marginTop: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: colors.textMuted, marginBottom: 10 }}>KİŞİYE ÖZEL TO-DO</div>
+
+
+                {/* Custom To-Do Input */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    style={{ ...s.input, flex: 1 }}
+                    placeholder="Özel to-do ekle..."
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target.value.trim()) {
+                        updateData(prev => ({
+                          ...prev,
+                          todos: [...(prev.todos || []), {
+                            id: uid(),
+                            text: `${e.target.value} — ${ct.name} (${company?.name})`,
+                            type: "manual",
+                            category: "takip",
+                            priority: 3,
+                            done: false,
+                            contactId: ct.id,
+                            companyId: ct.companyId,
+                            createdAt: new Date().toISOString()
+                          }]
+                        }));
+                        e.target.value = "";
+                      }
+                    }}
+                  />
+                  <button
+                    style={s.btn("primary")}
+                    onClick={(e) => {
+                      const input = e.target.previousSibling;
+                      if (input.value.trim()) {
+                        updateData(prev => ({
+                          ...prev,
+                          todos: [...(prev.todos || []), {
+                            id: uid(),
+                            text: `${input.value} — ${ct.name} (${company?.name})`,
+                            type: "manual",
+                            category: "takip",
+                            priority: 3,
+                            done: false,
+                            contactId: ct.id,
+                            companyId: ct.companyId,
+                            createdAt: new Date().toISOString()
+                          }]
+                        }));
+                        input.value = "";
+                      }
+                    }}
+                  >
+                    <PlusIcon size={14}/>
+                  </button>
+                </div>
+
+                {/* All Contact To-Dos */}
+                {(() => {
+                  const allContactTodos = (data.todos || []).filter(t => t.contactId === ct.id);
+                  const profileTodos = allContactTodos.filter(t => t.profileKey && !t.done);
+                  const actionTodos = allContactTodos.filter(t => (t.todoKey || !t.profileKey) && !t.done);
+                  const doneTodos = allContactTodos.filter(t => t.done);
+
+                  return (
+                    <div style={{ marginTop: 10 }}>
+                      {/* Sorulması Gerekenler */}
+                      {profileTodos.length > 0 && (
+                        <>
+                          <div style={{ fontSize: 11, color: colors.yellow, marginBottom: 6 }}>❓ Sorulması Gerekenler:</div>
+                          {profileTodos.map(todo => (
+                            <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 8px", background: colors.yellowDim, borderRadius: 4, marginBottom: 4 }}>
+                              <input
+                                type="checkbox"
+                                checked={false}
+                                onChange={() => updateData(prev => ({
+                                  ...prev,
+                                  todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: true } : t)
+                                }))}
+                              />
+                              <span style={{ flex: 1, color: colors.text }}>{todo.text.split(" — ")[0]}</span>
+                              <select
+                                style={{ ...s.select, fontSize: 10, padding: "2px 4px", width: 55, background: colors.accentDim, color: colors.accent }}
+                                value={todo.targetWeek || ""}
+                                onChange={(e) => {
+                                  const week = e.target.value ? parseInt(e.target.value) : null;
+                                  updateData(prev => ({
+                                    ...prev,
+                                    todos: prev.todos.map(t => t.id === todo.id ? { ...t, targetWeek: week, targetYear: week ? currentYear : null } : t)
+                                  }));
+                                }}
+                              >
+                                <option value="">—</option>
+                                {[...Array(8)].map((_, i) => <option key={i} value={currentWeek + i}>H{currentWeek + i}</option>)}
+                              </select>
+                              <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }))}><TrashIcon size={10}/></button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+
+                      {/* Aktif To-Do'lar */}
+                      {actionTodos.length > 0 && (
+                        <>
+                          <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, marginTop: profileTodos.length > 0 ? 10 : 0 }}>📋 Yapılacaklar:</div>
+                          {actionTodos.map(todo => (
+                            <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 0" }}>
+                              <input
+                                type="checkbox"
+                                checked={false}
+                                onChange={() => updateData(prev => ({
+                                  ...prev,
+                                  todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: true } : t)
+                                }))}
+                              />
+                              <span style={{ flex: 1, color: colors.text }}>{todo.text.split(" — ")[0]}</span>
+                              <select
+                                style={{ ...s.select, fontSize: 10, padding: "2px 4px", width: 55, background: todo.targetWeek ? colors.accentDim : "transparent", color: todo.targetWeek ? colors.accent : colors.textDim }}
+                                value={todo.targetWeek || ""}
+                                onChange={(e) => {
+                                  const week = e.target.value ? parseInt(e.target.value) : null;
+                                  updateData(prev => ({
+                                    ...prev,
+                                    todos: prev.todos.map(t => t.id === todo.id ? { ...t, targetWeek: week, targetYear: week ? currentYear : null } : t)
+                                  }));
+                                }}
+                              >
+                                <option value="">—</option>
+                                {[...Array(8)].map((_, i) => <option key={i} value={currentWeek + i}>H{currentWeek + i}</option>)}
+                              </select>
+                              <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }))}><TrashIcon size={10}/></button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+
+                      {/* Tamamlananlar */}
+                      {doneTodos.length > 0 && (
+                        <>
+                          <div style={{ fontSize: 11, color: colors.green, marginBottom: 6, marginTop: 10 }}>✅ Tamamlanan:</div>
+                          {doneTodos.map(todo => (
+                            <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 0", opacity: 0.6 }}>
+                              <input
+                                type="checkbox"
+                                checked={true}
+                                onChange={() => updateData(prev => ({
+                                  ...prev,
+                                  todos: prev.todos.map(t => t.id === todo.id ? { ...t, done: false } : t)
+                                }))}
+                              />
+                              <span style={{ flex: 1, textDecoration: "line-through", color: colors.textDim }}>{todo.text.split(" — ")[0]}</span>
+                              <button style={{ ...s.btn("danger"), padding: "2px 6px" }} onClick={() => updateData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== todo.id) }))}><TrashIcon size={10}/></button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+
+                      {/* Hızlı Ekle Butonları */}
+                      <div style={{ fontSize: 11, color: colors.accent, marginBottom: 6, marginTop: 12 }}>➕ Hızlı Ekle:</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {[
+                          { key: "whatsapp", label: "📱 WP kişi kartı", today: true },
+                          { key: "linkedin", label: "🔗 LinkedIn bağlan", today: true },
+                          { key: "email", label: "✉️ Mail at", today: true },
+                          { key: "info", label: "📄 Bilgi gönder", today: true },
+                          { key: "callback", label: "📞 Geri ara", today: false },
+                        ].map(item => {
+                          const today = new Date();
+                          let targetDate, targetWeek, targetYear;
+
+                          if (item.today) {
+                            targetDate = today.toISOString().split("T")[0];
+                            targetWeek = getWeekNumber(today);
+                            targetYear = today.getFullYear();
+                          } else if (ct.followUpDays) {
+                            const d = new Date();
+                            d.setDate(d.getDate() + ct.followUpDays);
+                            targetDate = d.toISOString().split("T")[0];
+                            targetWeek = getWeekNumber(d);
+                            targetYear = d.getFullYear();
+                          } else {
+                            targetDate = today.toISOString().split("T")[0];
+                            targetWeek = getWeekNumber(today);
+                            targetYear = today.getFullYear();
+                          }
+
+                          return (
+                            <button
+                              key={item.key}
+                              style={{ ...s.btn(), fontSize: 11, padding: "4px 8px" }}
+                              onClick={() => {
+                                updateData(prev => ({
+                                  ...prev,
+                                  todos: [...(prev.todos || []), {
+                                    id: uid(),
+                                    text: `${item.label} — ${ct.name} (${company?.name})`,
+                                    todoKey: item.key,
+                                    type: "manual",
+                                    category: "takip",
+                                    priority: 2,
+                                    done: false,
+                                    contactId: ct.id,
+                                    companyId: ct.companyId,
+                                    targetDate,
+                                    targetWeek,
+                                    targetYear,
+                                    createdAt: new Date().toISOString()
+                                  }]
+                                }));
+                              }}
+                            >
+                              + {item.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Contact Notes */}
+              <div style={{ marginTop: 16 }}>
+                <label style={{ fontSize: 10, color: colors.textDim }}>Kişi Notları</label>
+                <textarea
+                  style={{ ...s.input, height: 80, resize: "vertical" }}
+                  value={ct.notes || ""}
+                  onChange={(e) => updateContactField(ct.id, "notes", e.target.value)}
+                  placeholder="Bu kişi hakkında notlar..."
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
+
+  // ============================================================
+  // COMPANY DETAIL PANEL (SOL)
+  // ============================================================
+
+  const renderCompanyPanel = () => {
+    if (!expandedFirm) return null;
+    const company = data.companies.find(c => c.id === expandedFirm);
+    if (!company) return null;
+    const contacts = getContacts(company.id);
+    const parent = getParentCompany(company.id);
+    const logs = getCallLogs(company.id);
+
+    return (
+      <div style={{
+        position: "fixed",
+        top: 56,
+        left: 0,
+        bottom: 0,
+        width: showCallPanel ? "calc(100vw - 420px)" : 700,
+        maxWidth: showCallPanel ? "calc(100vw - 420px)" : "60vw",
+        background: colors.surface,
+        borderRight: `1px solid ${colors.border}`,
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "4px 0 20px rgba(0,0,0,0.3)"
+      }}>
+        <div style={{ background: "#ff0000", color: "#fff", padding: 8, fontSize: 14, fontWeight: 700 }}>YENİ PANEL - V2</div>
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{company.name}</div>
+            {parent && <div style={{ fontSize: 11, color: colors.textMuted }}>↳ {parent.name}</div>}
+          </div>
+          <button style={s.btn("danger")} onClick={() => setExpandedFirm(null)}><XIcon size={16}/></button>
+        </div>
+        <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+          {/* Quick Links */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            {company.linkedin && <a href={company.linkedin} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none" }}><LinkedinIcon size={14}/> LinkedIn</a>}
+            {company.website && <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none" }}><GlobeIcon size={14}/> Website</a>}
+            <button style={s.btn()} onClick={() => openAddContact(company.id)}><PlusIcon size={14}/> Kontakt Ekle</button>
+            <select style={s.select} value={company.pipeline} onChange={(e) => updateCompanyField(company.id, "pipeline", e.target.value)}>
+              <option value="new_target">Yeni Hedef</option>
+              <option value="contact_ready">Kontakt Hazır</option>
+              <option value="meeting_scheduled">Toplantı Alındı</option>
+              <option value="regular_followup">Düzenli Takip</option>
+              <option value="unreached">Ulaşılamadı</option>
+              <option value="not_interested">İlgilenmiyor</option>
+            </select>
+          </div>
+
+          {/* Contacts */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>KONTAKTLAR ({contacts.length})</div>
+          {contacts.length === 0 && <div style={{ color: colors.textDim, fontSize: 12 }}>Henüz kontakt yok</div>}
+          {contacts.map(ct => {
+            const profile = getProfile(ct.id);
+            return (
+              <div key={ct.id} style={{ ...s.card, padding: 12, marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                      {ct.name}
+                      {ct.reached && <Badge color={colors.green} bg={colors.greenDim}>✓</Badge>}
+                    </div>
+                    <div style={{ fontSize: 11, color: colors.textMuted }}>{ct.title}</div>
+                  </div>
+                  <select style={{ ...s.select, fontSize: 10, padding: "2px 6px" }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
+                    <option value="">—</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {ct.phone && (
+                    <button
+                      style={{ ...s.btn("success"), fontSize: 11 }}
+                      onClick={() => {
+                        setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone, result: "", notes: "", date: new Date().toISOString() });
+                        setShowCallPanel(true);
+                      }}
+                    >
+                      📞 {ct.phone}
+                    </button>
+                  )}
+                  {ct.phone2 && (
+                    <button
+                      style={{ ...s.btn("success"), fontSize: 11 }}
+                      onClick={() => {
+                        setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone2, result: "", notes: "", date: new Date().toISOString() });
+                        setShowCallPanel(true);
+                      }}
+                    >
+                      📞 {ct.phone2}
+                    </button>
+                  )}
+                  {ct.email && <span style={{ fontSize: 11, color: colors.yellow }}>✉️ {ct.email}</span>}
+                </div>
+                {profile && (
+                  <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {profile.communication && <Badge color={colors.accent} bg={colors.accentDim}>{profile.communication}</Badge>}
+                    {profile.decisionAuth && <Badge color={colors.purple} bg="#2d1a4e">{profile.decisionAuth}</Badge>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Call History */}
+          {logs.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>ARAMA GEÇMİŞİ</div>
+              {logs.slice(0, 5).map(log => (
+                <div key={log.id} style={{ fontSize: 11, padding: "4px 0", borderBottom: `1px solid ${colors.border}`, display: "flex", gap: 8 }}>
+                  <span style={{ color: colors.textDim }}>{new Date(log.date).toLocaleDateString("tr")}</span>
+                  <Badge color={log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red} bg={log.result === "meeting" ? colors.greenDim : log.result === "introduced" ? colors.yellowDim : colors.redDim}>
+                    {log.result === "meeting" ? "Toplantı" : log.result === "introduced" ? "Ulaşıldı" : log.result === "unreached" ? "Ulaşılamadı" : log.result}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================
+  // CALL PANEL (SAĞ)
+  // ============================================================
+
+  const renderCallPanel = () => {
+    if (!showCallPanel || !callResult) return null;
+
+    return (
+      <div style={{
+        position: "fixed",
+        top: 56,
+        right: 0,
+        bottom: 0,
+        width: 400,
+        background: colors.surface,
+        borderLeft: `1px solid ${colors.border}`,
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "-4px 0 20px rgba(0,0,0,0.3)"
+      }}>
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>📞 Arama Notu</div>
+            <div style={{ fontSize: 11, color: colors.textMuted }}>{callResult.contactName} — {callResult.phone}</div>
+          </div>
+          <button style={s.btn("danger")} onClick={() => { setShowCallPanel(false); setCallResult(null); }}><XIcon size={16}/></button>
+        </div>
+        <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: colors.textMuted }}>Sonuç</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+              {[
+                { value: "meeting", label: "✅ Toplantı", color: colors.green },
+                { value: "introduced", label: "🤝 Ulaşıldı", color: colors.yellow },
+                { value: "unreached", label: "❌ Ulaşılamadı", color: colors.red },
+                { value: "wrong_number", label: "⚠️ Yanlış No", color: colors.orange },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  style={{ ...s.btn(callResult.result === opt.value ? "primary" : "default"), fontSize: 11 }}
+                  onClick={() => setCallResult({ ...callResult, result: opt.value })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: colors.textMuted }}>Not</label>
+            <textarea style={{ ...s.input, height: 80, marginTop: 4 }} value={callResult.notes || ""} onChange={e => setCallResult({ ...callResult, notes: e.target.value })} placeholder="Görüşme notları..." />
+          </div>
+          <button style={{ ...s.btn("primary"), width: "100%" }} onClick={saveCallLog} disabled={!callResult.result}>Kaydet</button>
+        </div>
+      </div>
+    );
+  };
 
   // ============================================================
   // MAIN RENDER
@@ -1746,6 +2573,7 @@ function SalesPipelineApp() {
             { id: "companies", label: "🏢 Firmalar" },
             { id: "competitors", label: "⚔️ Rakipler" },
             { id: "todos", label: "✅ To-Do" },
+            { id: "actions", label: "📋 Aksiyonlar" },
           ].map(t => (
             <button key={t.id} style={s.tab(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
           ))}
@@ -1764,16 +2592,28 @@ function SalesPipelineApp() {
         </div>
       </div>
 
-      {/* Content */}
-      <div style={s.content}>
+      {/* Content - shifts when panels open */}
+      <div style={{
+        ...s.content,
+        marginLeft: expandedFirm ? (showCallPanel ? "calc(100vw - 420px)" : 700) : 0,
+        marginRight: showCallPanel && !expandedFirm ? 400 : 0,
+        transition: "margin 0.2s ease"
+      }}>
         {activeTab === "weekly" && renderWeeklyView()}
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "companies" && renderAllCompanies()}
         {activeTab === "competitors" && renderCompetitors()}
         {activeTab === "todos" && renderTodos()}
+        {activeTab === "actions" && renderActions()}
       </div>
 
-      {/* Modals */}
+      {/* Company Detail Panel (Left) */}
+      {renderCompanyPanel()}
+
+      {/* Call Panel (Right) */}
+      {renderCallPanel()}
+
+      {/* Other Modals */}
       {renderModals()}
 
       {/* Sync Notification */}
