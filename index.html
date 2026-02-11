@@ -2423,6 +2423,13 @@ function SalesPipelineApp() {
             const profile = getProfile(ct.id);
             return (
               <div key={ct.id} style={{ ...s.card, padding: "10px 12px", marginBottom: 6, display: "flex", alignItems: "center", gap: 12 }}>
+                {/* Öncelik - En Başta */}
+                <select style={{ ...s.select, fontSize: 10, padding: "2px 6px", width: 40 }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
+                  <option value="">—</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
                 {/* İsim ve Ünvan */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
@@ -2456,13 +2463,6 @@ function SalesPipelineApp() {
                     </button>
                   )}
                 </div>
-                {/* Öncelik */}
-                <select style={{ ...s.select, fontSize: 10, padding: "2px 6px", width: 40 }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
-                  <option value="">—</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                </select>
               </div>
             );
           })}
