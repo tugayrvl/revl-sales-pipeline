@@ -2424,9 +2424,9 @@ function SalesPipelineApp() {
           {contacts.map(ct => {
             const profile = getProfile(ct.id);
             return (
-              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>
+              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "grid", gridTemplateColumns: "40px 2fr 1fr 1fr 50px", alignItems: "center", gap: 12 }}>
                 {/* 1. Öncelik */}
-                <select style={{ ...s.select, fontSize: 10, padding: "2px 4px", width: 36 }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
+                <select style={{ ...s.select, fontSize: 10, padding: "2px 4px" }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
                   <option value="">—</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
@@ -2434,7 +2434,7 @@ function SalesPipelineApp() {
                 </select>
                 {/* 2. İsim (tıklanabilir - profil açar) */}
                 <span
-                  style={{ fontWeight: 600, fontSize: 13, cursor: "pointer", color: colors.accent, minWidth: 120 }}
+                  style={{ fontWeight: 600, fontSize: 13, cursor: "pointer", color: colors.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                   onClick={() => { setSelectedContact(ct); setShowModal("contactProfile"); }}
                   title="Profili aç"
                 >
@@ -2442,10 +2442,10 @@ function SalesPipelineApp() {
                   {ct.reached && <Badge color={colors.green} bg={colors.greenDim} style={{ marginLeft: 4 }}>✓</Badge>}
                 </span>
                 {/* 3-4. Telefon Numaraları - Alt Alta */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 130 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                   {ct.phone ? (
                     <button
-                      style={{ ...s.btn("success"), fontSize: 10, padding: "3px 6px" }}
+                      style={{ ...s.btn("success"), fontSize: 10, padding: "3px 6px", width: "100%" }}
                       onClick={() => {
                         setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone, result: "", notes: "", date: new Date().toISOString() });
                         setShowCallPanel(true);
@@ -2456,7 +2456,7 @@ function SalesPipelineApp() {
                   ) : <span style={{ fontSize: 10, color: colors.textDim }}>—</span>}
                   {ct.phone2 && (
                     <button
-                      style={{ ...s.btn("success"), fontSize: 10, padding: "3px 6px" }}
+                      style={{ ...s.btn("success"), fontSize: 10, padding: "3px 6px", width: "100%" }}
                       onClick={() => {
                         setCallResult({ companyId: company.id, contactId: ct.id, contactName: ct.name, companyName: company.name, phone: ct.phone2, result: "", notes: "", date: new Date().toISOString() });
                         setShowCallPanel(true);
@@ -2467,16 +2467,16 @@ function SalesPipelineApp() {
                   )}
                 </div>
                 {/* 5. Email */}
-                <span style={{ fontSize: 11, color: ct.email ? colors.yellow : colors.textDim, minWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ct.email || "Email yok"}>
-                  {ct.email ? `✉️ ${ct.email.split("@")[0]}` : "—"}
+                <span style={{ fontSize: 11, color: ct.email ? colors.yellow : colors.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ct.email || "Email yok"}>
+                  {ct.email ? `✉️ ${ct.email}` : "—"}
                 </span>
                 {/* 6. LinkedIn */}
                 {ct.linkedin ? (
-                  <a href={ct.linkedin.startsWith("http") ? ct.linkedin : `https://${ct.linkedin}`} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, fontSize: 11 }} title={ct.linkedin}>
+                  <a href={ct.linkedin.startsWith("http") ? ct.linkedin : `https://${ct.linkedin}`} target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, fontSize: 11, textAlign: "center" }} title={ct.linkedin}>
                     🔗 in
                   </a>
                 ) : (
-                  <span style={{ fontSize: 11, color: colors.textDim }}>—</span>
+                  <span style={{ fontSize: 11, color: colors.textDim, textAlign: "center" }}>—</span>
                 )}
               </div>
             );
