@@ -880,6 +880,9 @@ function SalesPipelineApp() {
       ...prev,
       companies: prev.companies.map(c => c.id === companyId ? { ...c, [field]: value } : c)
     }));
+    if (["deviceStatus", "deviceBrand", "contractEndDate"].includes(field)) {
+      showSync("Cihaz bilgisi kaydedildi ✓");
+    }
   };
 
   const updateContactField = (contactId, field, value) => {
@@ -1044,7 +1047,8 @@ function SalesPipelineApp() {
 
   const renderCompanyCard = (company, type) => {
     const contacts = getContacts(company.id);
-    const hasPhone = contacts.some(c => c.phone);
+    const contactsWithPhone = contacts.filter(c => c.phone);
+    const hasPhone = contactsWithPhone.length > 0;
     const hasAny = contacts.length > 0;
     const statusColor = hasPhone ? colors.green : hasAny ? colors.yellow : colors.red;
     const statusDot = hasPhone ? "🟢" : hasAny ? "🟡" : "🔴";
@@ -1054,18 +1058,36 @@ function SalesPipelineApp() {
     return (
       <div key={company.id} style={{ ...s.card, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0 }}>
         <div onClick={() => openCompanyDetail(company)}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: 12 }}>{statusDot}</span>
               <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={company.name}>{company.name}</span>
             </div>
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+            {hasAny ? (
+              <>
+                <Badge color={colors.accent} bg={colors.accentDim}>{contacts.length} Kontakt</Badge>
+                {hasPhone ? (
+                  <Badge color={colors.green} bg={colors.greenDim}>📞 {contactsWithPhone.length}</Badge>
+                ) : (
+                  <Badge color={colors.orange} bg={colors.orangeDim}>⚠️ Hazır Kontakt Yok</Badge>
+                )}
+              </>
+            ) : (
+              <Badge color={colors.red} bg={colors.redDim}>Kontakt Yok</Badge>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
             <PipelineBadge stage={company.pipeline} />
-            <DeviceBadge status={company.deviceStatus} brand={company.deviceBrand} />
             {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
           </div>
           {parent && <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>↳ {parent.name}</div>}
+          {company.deviceStatus && company.deviceStatus !== "unknown" && (
+            <div style={{ fontSize: 10, color: company.deviceStatus === "competitor" ? colors.red : company.deviceStatus === "none" ? colors.green : colors.accent, marginTop: 4 }}>
+              {company.deviceStatus === "none" ? "Cihaz Yok" : company.deviceStatus === "ours" ? "Bizde" : company.deviceStatus === "competitor" ? `Cihaz Var${company.deviceBrand ? ` / ${company.deviceBrand}` : ""}` : ""}
+            </div>
+          )}
         </div>
       </div>
     );
