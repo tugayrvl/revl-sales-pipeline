@@ -1100,18 +1100,22 @@ function SalesPipelineApp({ onLogout }) {
   const saveCallLog = () => {
     updateData(prev => {
       const next = { ...prev, callLogs: [...prev.callLogs, { ...callResult, id: uid() }] };
-      // Update status
-      const comp = next.companies.find(c => c.id === callResult.companyId);
-      if (comp) {
-        if (callResult.result === "meeting") comp.status = "meeting";
-        else if (callResult.result === "introduced") { comp.status = "contact_ready"; comp.trackingType = "followup"; }
-        else if (callResult.result === "unreached") comp.status = "unreached";
-        else if (callResult.result === "wrong_number") comp.status = "wrong_person";
-        else if (callResult.result === "not_interested") comp.status = "not_interested";
-      }
+      // Update company status - create new companies array with updated company
+      next.companies = prev.companies.map(comp => {
+        if (comp.id === callResult.companyId) {
+          const updated = { ...comp };
+          if (callResult.result === "meeting") updated.status = "meeting";
+          else if (callResult.result === "introduced") { updated.status = "contact_ready"; updated.trackingType = "followup"; }
+          else if (callResult.result === "unreached") updated.status = "unreached";
+          else if (callResult.result === "wrong_number") updated.status = "wrong_person";
+          else if (callResult.result === "not_interested") updated.status = "not_interested";
+          return updated;
+        }
+        return comp;
+      });
       // Update contact status when reached
       if (callResult.result === "introduced" || callResult.result === "meeting") {
-        next.contacts = next.contacts.map(c =>
+        next.contacts = prev.contacts.map(c =>
           c.id === callResult.contactId ? { ...c, reached: true, reachedAt: new Date().toISOString() } : c
         );
       }
