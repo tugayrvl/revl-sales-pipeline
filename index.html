@@ -1062,7 +1062,7 @@ function SalesPipelineApp({ onLogout }) {
       let updatedCompanies = prev.companies;
 
       // Auto-update pipeline to "contact_ready" if phone provided
-      if (modalData.phone) {
+      if (modalData.phone || modalData.phone2) {
         const company = prev.companies.find(c => c.id === modalData.companyId);
         if (company && (!company.status || company.status === "no_ready_contact")) {
           updatedCompanies = prev.companies.map(c =>
@@ -2366,11 +2366,17 @@ function SalesPipelineApp({ onLogout }) {
                 <label style={{ fontSize: 11, color: colors.textMuted }}>Ünvan</label>
                 <input style={s.input} value={modalData.title || ""} onChange={e => setModalData({ ...modalData, title: e.target.value })} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <label style={{ fontSize: 11, color: colors.textMuted }}>Telefon</label>
-                  <input style={s.input} value={modalData.phone || ""} onChange={e => setModalData({ ...modalData, phone: e.target.value })} />
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Telefon 1</label>
+                  <input style={s.input} value={modalData.phone || ""} onChange={e => setModalData({ ...modalData, phone: e.target.value })} placeholder="+90 5XX XXX XX XX" />
                 </div>
+                <div>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Telefon 2</label>
+                  <input style={s.input} value={modalData.phone2 || ""} onChange={e => setModalData({ ...modalData, phone2: e.target.value })} placeholder="+90 5XX XXX XX XX" />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 11, color: colors.textMuted }}>Email</label>
                   <input style={s.input} value={modalData.email || ""} onChange={e => setModalData({ ...modalData, email: e.target.value })} />
