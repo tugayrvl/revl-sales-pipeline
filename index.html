@@ -264,7 +264,7 @@ const StatusBadge = ({ status, hasPhoneContact }) => {
   const effectiveStatus = status || (hasPhoneContact ? "contact_ready" : "no_ready_contact");
   const map = {
     contact_ready: { label: "Kontakt Hazır", color: colors.green, bg: colors.greenDim },
-    no_ready_contact: { label: "Hazır Kontakt Yok", color: colors.orange, bg: colors.orangeDim },
+    no_ready_contact: { label: "⚠️ Hazır Kontakt Yok", color: colors.orange, bg: colors.orangeDim },
     unreached: { label: "Ulaşılamadı", color: colors.red, bg: colors.redDim },
     wrong_person: { label: "Yanlış Kişi", color: colors.yellow, bg: colors.yellowDim },
     meeting: { label: "Toplantı Alındı", color: colors.purple, bg: "#2d1a4e" },
@@ -1118,11 +1118,7 @@ function SalesPipelineApp() {
             {hasAny ? (
               <>
                 <Badge color={colors.accent} bg={colors.accentDim}>{contacts.length} Kontakt</Badge>
-                {hasPhone ? (
-                  <Badge color={colors.green} bg={colors.greenDim}>📞 {contactsWithPhone.length}</Badge>
-                ) : (
-                  <Badge color={colors.orange} bg={colors.orangeDim}>⚠️ Hazır Kontakt Yok</Badge>
-                )}
+                {hasPhone && <Badge color={colors.green} bg={colors.greenDim}>📞 {contactsWithPhone.length}</Badge>}
               </>
             ) : (
               <Badge color={colors.red} bg={colors.redDim}>Kontakt Yok</Badge>
