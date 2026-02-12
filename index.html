@@ -2424,7 +2424,7 @@ function SalesPipelineApp() {
           {contacts.map(ct => {
             const profile = getProfile(ct.id);
             return (
-              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "grid", gridTemplateColumns: "40px 2fr 1fr 1fr 50px", alignItems: "center", gap: 12 }}>
+              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "grid", gridTemplateColumns: "40px 1.5fr 2.2fr 1fr 1fr 50px", alignItems: "center", gap: 8 }}>
                 {/* 1. Öncelik */}
                 <select style={{ ...s.select, fontSize: 10, padding: "2px 4px" }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
                   <option value="">—</option>
@@ -2441,7 +2441,11 @@ function SalesPipelineApp() {
                   {ct.name}
                   {ct.reached && <Badge color={colors.green} bg={colors.greenDim} style={{ marginLeft: 4 }}>✓</Badge>}
                 </span>
-                {/* 3-4. Telefon Numaraları - Alt Alta */}
+                {/* 3. Ünvan */}
+                <span style={{ fontSize: 11, color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ct.title || ""}>
+                  {ct.title || "—"}
+                </span>
+                {/* 4. Telefon Numaraları - Alt Alta */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                   {ct.phone ? (
                     <button
