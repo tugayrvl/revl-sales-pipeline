@@ -638,6 +638,26 @@ function SalesPipelineApp({ onLogout }) {
     }
   }, []);
 
+  // Migrate: Add followupStartDate to existing followup companies
+  useEffect(() => {
+    let needsMigration = false;
+    const migratedCompanies = data.companies.map(c => {
+      if (c.trackingType === "followup" && !c.followupStartDate) {
+        needsMigration = true;
+        // Try to find earliest call log for this company, otherwise use today
+        const companyLogs = data.callLogs.filter(l => l.companyId === c.id);
+        const earliestCall = companyLogs.length > 0
+          ? new Date(Math.min(...companyLogs.map(l => new Date(l.date).getTime()))).toISOString()
+          : new Date().toISOString();
+        return { ...c, followupStartDate: earliestCall };
+      }
+      return c;
+    });
+    if (needsMigration) {
+      setData(prev => ({ ...prev, companies: migratedCompanies }));
+    }
+  }, []);
+
   const showSync = useCallback((msg) => {
     setSyncNotif(msg || "Kaydedildi ✓");
     setTimeout(() => setSyncNotif(false), 2000);
