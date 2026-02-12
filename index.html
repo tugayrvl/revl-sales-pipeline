@@ -1585,10 +1585,12 @@ function SalesPipelineApp({ onLogout }) {
   const renderDashboard = () => {
     const trackingCounts = { target: 0, followup: 0, none: 0 };
     const statusCounts = {};
+    const pipelineCounts = {};
     data.companies.forEach(c => {
       trackingCounts[c.trackingType || "none"]++;
       const effectiveStatus = c.status || (data.contacts.some(ct => ct.companyId === c.id && ct.phone) ? "contact_ready" : "no_ready_contact");
       statusCounts[effectiveStatus] = (statusCounts[effectiveStatus] || 0) + 1;
+      if (c.pipeline) pipelineCounts[c.pipeline] = (pipelineCounts[c.pipeline] || 0) + 1;
     });
     const parentComps = data.companies.filter(c => c.isParent);
 
