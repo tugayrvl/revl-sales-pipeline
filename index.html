@@ -696,7 +696,9 @@ function SalesPipelineApp({ onLogout }) {
 
   // Call log detail popup state
   const [viewingCallLog, setViewingCallLog] = useState(null);
-  const [viewingNextCallNote, setViewingNextCallNote] = useState(null); // { contactName, note }
+  const [viewingNextCallNote, setViewingNextCallNote] = useState(null); // { contactId, contactName, note }
+  const [editingNextCallNote, setEditingNextCallNote] = useState(false);
+  const [editedNoteText, setEditedNoteText] = useState("");
 
   const getProfile = useCallback((contactId) =>
     data.contactProfiles.find(p => p.contactId === contactId),
@@ -2927,21 +2929,57 @@ function SalesPipelineApp({ onLogout }) {
 
       {/* Next Call Note Modal */}
       {viewingNextCallNote && (
-        <div style={s.modal} onClick={() => setViewingNextCallNote(null)}>
+        <div style={s.modal} onClick={() => { setViewingNextCallNote(null); setEditingNextCallNote(false); }}>
           <div style={{ ...s.modalContent, maxWidth: 400, border: "2px solid #eab308" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 15, color: "#eab308" }}>💡 Sonraki Aramada Sor</div>
-              <button style={s.btn("danger")} onClick={() => setViewingNextCallNote(null)}><XIcon size={16}/></button>
+              <button style={s.btn("danger")} onClick={() => { setViewingNextCallNote(null); setEditingNextCallNote(false); }}><XIcon size={16}/></button>
             </div>
             <div style={{ marginBottom: 12 }}>
               <span style={{ fontSize: 11, color: colors.textMuted }}>Kişi: </span>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{viewingNextCallNote.contactName}</span>
             </div>
-            <div style={{ background: "#3d2e08", border: "1px solid #eab308", borderRadius: 8, padding: 16 }}>
-              <div style={{ fontSize: 14, color: "#fef08a", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                {viewingNextCallNote.note}
+            {editingNextCallNote ? (
+              <div>
+                <textarea
+                  style={{ ...s.input, height: 120, marginBottom: 12, borderColor: "#eab308" }}
+                  value={editedNoteText}
+                  onChange={(e) => setEditedNoteText(e.target.value)}
+                  placeholder="Sonraki aramada sorulacak konular..."
+                  autoFocus
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={{ ...s.btn("primary"), flex: 1 }}
+                    onClick={() => {
+                      updateData(prev => {
+                        const profiles = [...prev.contactProfiles];
+                        const idx = profiles.findIndex(p => p.contactId === viewingNextCallNote.contactId);
+                        if (idx >= 0) {
+                          profiles[idx] = { ...profiles[idx], nextCallAsk: editedNoteText, updatedAt: new Date().toISOString() };
+                        }
+                        return { ...prev, contactProfiles: profiles };
+                      });
+                      setViewingNextCallNote({ ...viewingNextCallNote, note: editedNoteText });
+                      setEditingNextCallNote(false);
+                      showSync("Not güncellendi ✓");
+                    }}
+                  >
+                    💾 Kaydet
+                  </button>
+                  <button style={s.btn()} onClick={() => { setEditedNoteText(viewingNextCallNote.note); setEditingNextCallNote(false); }}>İptal</button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div>
+                <div style={{ background: "#3d2e08", border: "1px solid #eab308", borderRadius: 8, padding: 16, marginBottom: 12 }}>
+                  <div style={{ fontSize: 14, color: "#fef08a", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                    {viewingNextCallNote.note}
+                  </div>
+                </div>
+                <button style={{ ...s.btn(), width: "100%" }} onClick={() => setEditingNextCallNote(true)}>✏️ Düzenle</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3144,7 +3182,7 @@ function SalesPipelineApp({ onLogout }) {
                     {hasNextCallNote && (
                       <button
                         style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, background: "#3d2e08", border: "2px solid #eab308", borderRadius: 6, color: "#eab308", cursor: "pointer", animation: "pulse 2s infinite" }}
-                        onClick={() => setViewingNextCallNote({ contactName: log.contactName, note: profile.nextCallAsk })}
+                        onClick={() => { setViewingNextCallNote({ contactId: log.contactId, contactName: log.contactName, note: profile.nextCallAsk }); setEditedNoteText(profile.nextCallAsk); setEditingNextCallNote(false); }}
                         title="Sonraki aramada sor!"
                       >
                         💡 SOR
@@ -3202,7 +3240,7 @@ function SalesPipelineApp({ onLogout }) {
                   {hasNextCallNote && (
                     <button
                       style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, background: "#3d2e08", border: "2px solid #eab308", borderRadius: 6, color: "#eab308", cursor: "pointer" }}
-                      onClick={() => setViewingNextCallNote({ contactName: log.contactName, note: profile.nextCallAsk })}
+                      onClick={() => { setViewingNextCallNote({ contactId: log.contactId, contactName: log.contactName, note: profile.nextCallAsk }); setEditedNoteText(profile.nextCallAsk); setEditingNextCallNote(false); }}
                       title="Sonraki aramada sor!"
                     >
                       💡 SOR
