@@ -1543,14 +1543,20 @@ function SalesPipelineApp() {
   const renderCompetitors = () => {
     const competitors = data.competitors || [];
 
-    // AVM'den gelen notlar (deviceBrand olan ama competitors'ta olmayan)
+    // AVM'den gelen notlar (deviceBrand olan firmalar)
     const competitorNames = competitors.map(c => c.name.toLowerCase());
-    const avmNotes = [];
+    const unmatchedNotes = [];
+    const matchedNotes = [];
     data.companies.filter(c => c.deviceStatus === "competitor" && c.deviceBrand).forEach(c => {
-      if (!competitorNames.includes(c.deviceBrand.toLowerCase())) {
-        avmNotes.push({ brand: c.deviceBrand, company: c });
+      const isMatched = competitorNames.includes(c.deviceBrand.toLowerCase());
+      if (isMatched) {
+        matchedNotes.push({ brand: c.deviceBrand, company: c, matched: true });
+      } else {
+        unmatchedNotes.push({ brand: c.deviceBrand, company: c, matched: false });
       }
     });
+    // Eşleşmemişler önce, eşleşmişler sonda
+    const avmNotes = [...unmatchedNotes, ...matchedNotes];
 
     return (
       <div>
@@ -1624,23 +1630,28 @@ function SalesPipelineApp() {
             <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 12 }}>Bu notları ilgili rakip firmaya atayın veya yeni rakip firma olarak ekleyin.</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {avmNotes.map((note, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: colors.surface, borderRadius: 4, border: `1px solid ${colors.border}` }}>
-                  <span style={{ fontSize: 12, flex: 1 }}>{note.brand}</span>
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: note.matched ? colors.greenDim : colors.surface, borderRadius: 4, border: `1px solid ${note.matched ? colors.green : colors.border}` }}>
+                  <span style={{ fontSize: 12, flex: 1, color: note.matched ? colors.green : colors.text }}>{note.brand}</span>
                   <span style={{ fontSize: 10, color: colors.textDim }}>({note.company.name})</span>
-                  <select
-                    style={{ ...s.select, fontSize: 11, padding: "3px 6px" }}
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        updateCompanyField(note.company.id, "deviceBrand", e.target.value);
-                      }
-                    }}
-                  >
-                    <option value="">Rakip Seç...</option>
-                    {competitors.map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
+                  {note.matched ? (
+                    <Badge color={colors.green} bg={colors.greenDim}>✓ Eşleşti</Badge>
+                  ) : (
+                    <select
+                      style={{ ...s.select, fontSize: 11, padding: "3px 6px" }}
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          updateCompanyField(note.company.id, "deviceBrand", e.target.value);
+                          showSync("Rakip eşleştirildi ✓");
+                        }
+                      }}
+                    >
+                      <option value="">Rakip Seç...</option>
+                      {competitors.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               ))}
             </div>
