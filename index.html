@@ -24,6 +24,11 @@ a { color: #3b82f6; }
 @media (max-width: 768px) {
   .stat-card { min-width: 80px !important; }
 }
+/* Pulse animation for attention */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
 </style>
 </head>
 <body>
@@ -691,6 +696,7 @@ function SalesPipelineApp({ onLogout }) {
 
   // Call log detail popup state
   const [viewingCallLog, setViewingCallLog] = useState(null);
+  const [viewingNextCallNote, setViewingNextCallNote] = useState(null); // { contactName, note }
 
   const getProfile = useCallback((contactId) =>
     data.contactProfiles.find(p => p.contactId === contactId),
@@ -2918,6 +2924,27 @@ function SalesPipelineApp({ onLogout }) {
           </div>
         </div>
       )}
+
+      {/* Next Call Note Modal */}
+      {viewingNextCallNote && (
+        <div style={s.modal} onClick={() => setViewingNextCallNote(null)}>
+          <div style={{ ...s.modalContent, maxWidth: 400, border: "2px solid #eab308" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#eab308" }}>💡 Sonraki Aramada Sor</div>
+              <button style={s.btn("danger")} onClick={() => setViewingNextCallNote(null)}><XIcon size={16}/></button>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>Kişi: </span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{viewingNextCallNote.contactName}</span>
+            </div>
+            <div style={{ background: "#3d2e08", border: "1px solid #eab308", borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 14, color: "#fef08a", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                {viewingNextCallNote.note}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -3105,6 +3132,8 @@ function SalesPipelineApp({ onLogout }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>ARAMALAR ({logs.length})</div>
               {logs.map(log => {
                 const resultLabels = { meeting: "✅ Toplantı", introduced: "🤝 Ulaşıldı", unreached: "❌ Ulaşılamadı", wrong_number: "⚠️ Yanlış No", not_interested: "🚫 İlgilenmiyor" };
+                const profile = getProfile(log.contactId);
+                const hasNextCallNote = profile?.nextCallAsk;
                 return (
                   <div key={log.id} style={{ fontSize: 11, padding: "6px 8px", marginBottom: 4, background: colors.card, borderRadius: 4, display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ color: colors.textDim, minWidth: 100 }}>{new Date(log.date).toLocaleDateString("tr")} {new Date(log.date).toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}</span>
@@ -3112,6 +3141,15 @@ function SalesPipelineApp({ onLogout }) {
                     <Badge color={log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red} bg={log.result === "meeting" ? colors.greenDim : log.result === "introduced" ? colors.yellowDim : colors.redDim}>
                       {resultLabels[log.result] || log.result}
                     </Badge>
+                    {hasNextCallNote && (
+                      <button
+                        style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, background: "#3d2e08", border: "2px solid #eab308", borderRadius: 6, color: "#eab308", cursor: "pointer", animation: "pulse 2s infinite" }}
+                        onClick={() => setViewingNextCallNote({ contactName: log.contactName, note: profile.nextCallAsk })}
+                        title="Sonraki aramada sor!"
+                      >
+                        💡 SOR
+                      </button>
+                    )}
                     <button style={{ ...s.btn(), padding: "2px 6px", fontSize: 10 }} onClick={() => setViewingCallLog(log)} title="Detayları gör">📋</button>
                     <button style={{ ...s.btn("danger"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteCallLog(log.id)} title="Sil">🗑️</button>
                   </div>
@@ -3154,14 +3192,27 @@ function SalesPipelineApp({ onLogout }) {
         {contactLogs.length > 0 && (
           <div style={{ padding: "8px 16px", borderBottom: `1px solid ${colors.border}`, background: colors.card, maxHeight: 150, overflowY: "auto" }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: colors.textMuted, marginBottom: 6 }}>ARAMA GEÇMİŞİ ({contactLogs.length})</div>
-            {contactLogs.map(log => (
-              <div key={log.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 11, borderBottom: `1px solid ${colors.border}` }}>
-                <span style={{ color: colors.textDim, minWidth: 70 }}>{new Date(log.date).toLocaleDateString("tr")} {new Date(log.date).toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}</span>
-                <span style={{ flex: 1, color: log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red }}>{resultLabels[log.result] || log.result}</span>
-                <button style={{ ...s.btn(), padding: "2px 6px", fontSize: 10 }} onClick={() => setViewingCallLog(log)} title="Detayları gör">📋</button>
-                <button style={{ ...s.btn("danger"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteCallLog(log.id)} title="Sil">🗑️</button>
-              </div>
-            ))}
+            {contactLogs.map(log => {
+              const profile = getProfile(log.contactId);
+              const hasNextCallNote = profile?.nextCallAsk;
+              return (
+                <div key={log.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 11, borderBottom: `1px solid ${colors.border}` }}>
+                  <span style={{ color: colors.textDim, minWidth: 70 }}>{new Date(log.date).toLocaleDateString("tr")} {new Date(log.date).toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span style={{ flex: 1, color: log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red }}>{resultLabels[log.result] || log.result}</span>
+                  {hasNextCallNote && (
+                    <button
+                      style={{ padding: "2px 8px", fontSize: 10, fontWeight: 700, background: "#3d2e08", border: "2px solid #eab308", borderRadius: 6, color: "#eab308", cursor: "pointer" }}
+                      onClick={() => setViewingNextCallNote({ contactName: log.contactName, note: profile.nextCallAsk })}
+                      title="Sonraki aramada sor!"
+                    >
+                      💡 SOR
+                    </button>
+                  )}
+                  <button style={{ ...s.btn(), padding: "2px 6px", fontSize: 10 }} onClick={() => setViewingCallLog(log)} title="Detayları gör">📋</button>
+                  <button style={{ ...s.btn("danger"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteCallLog(log.id)} title="Sil">🗑️</button>
+                </div>
+              );
+            })}
           </div>
         )}
         <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
