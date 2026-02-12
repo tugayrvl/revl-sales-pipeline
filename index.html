@@ -1471,28 +1471,28 @@ function SalesPipelineApp({ onLogout }) {
     const cardBg = needsAction ? "rgba(255, 200, 100, 0.08)" : s.card.background;
 
     return (
-      <div key={company.id} style={{ ...s.card, background: cardBg, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0, position: "relative" }}>
-        {/* Followup Badge - Days since last call / Days in followup */}
-        {type === "followup" && daysInFollowup !== null && (
-          <div style={{
-            position: "absolute",
-            top: 4,
-            right: 4,
-            fontSize: 9,
-            fontWeight: 600,
-            color: daysSinceLastCall > 14 ? colors.red : daysSinceLastCall > 7 ? colors.orange : colors.textMuted,
-            background: colors.surfaceHover,
-            padding: "2px 5px",
-            borderRadius: 4,
-          }}>
-            {daysSinceLastCall !== null ? `${daysSinceLastCall}/` : ""}{daysInFollowup} gün
-          </div>
-        )}
+      <div key={company.id} style={{ ...s.card, background: cardBg, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0 }}>
         <div onClick={() => openCompanyDetail(company)}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: 12 }}>{statusDot}</span>
-              <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: type === "followup" ? 50 : 0 }} title={company.name}>{company.name}</span>
+              <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={company.name}>{company.name}</span>
+              {/* Followup Badge - Days since last call / Days in followup */}
+              {type === "followup" && daysInFollowup !== null && (
+                <span style={{
+                  marginLeft: "auto",
+                  fontSize: 9,
+                  fontWeight: 600,
+                  color: daysSinceLastCall > 14 ? colors.red : daysSinceLastCall > 7 ? colors.orange : colors.textMuted,
+                  background: colors.surfaceHover,
+                  padding: "2px 5px",
+                  borderRadius: 4,
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}>
+                  {daysSinceLastCall !== null ? `${daysSinceLastCall}/` : ""}{daysInFollowup} gün
+                </span>
+              )}
             </div>
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
