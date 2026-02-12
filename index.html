@@ -10,6 +10,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0e17; overflow: auto; }
@@ -99,10 +100,18 @@ const getWeekDates = (week, year = currentYear) => {
 };
 
 // ============================================================
-// DATA STORE (localStorage-backed, Supabase-ready)
+// DATA STORE (Supabase + localStorage fallback)
 // ============================================================
 
 const STORAGE_KEY = "sales_pipeline_data";
+
+// ⚠️ SUPABASE CONFIG - Kendi bilgilerinle değiştir!
+const SUPABASE_URL = "https://your-project.supabase.co"; // Buraya kendi URL'ini yaz
+const SUPABASE_ANON_KEY = "your-anon-key"; // Buraya kendi key'ini yaz
+
+// Supabase client (sadece config doğruysa aktif)
+const supabaseEnabled = SUPABASE_URL !== "https://your-project.supabase.co" && SUPABASE_ANON_KEY !== "your-anon-key";
+const supabase = supabaseEnabled ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 const defaultData = () => ({
   companies: [],
@@ -120,15 +129,63 @@ const defaultData = () => ({
   demoProcesses: [],
 });
 
-const loadData = () => {
+// LocalStorage functions (fallback)
+const loadDataFromLocal = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? { ...defaultData(), ...JSON.parse(raw) } : defaultData();
   } catch { return defaultData(); }
 };
 
-const saveData = (data) => {
+const saveDataToLocal = (data) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+};
+
+// Supabase functions
+const loadDataFromSupabase = async () => {
+  if (!supabase) return null;
+  try {
+    const { data: record, error } = await supabase
+      .from('app_data')
+      .select('data')
+      .eq('user_id', 'default')
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    return record?.data ? { ...defaultData(), ...record.data } : null;
+  } catch (err) {
+    console.error('Supabase load error:', err);
+    return null;
+  }
+};
+
+const saveDataToSupabase = async (data) => {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('app_data')
+      .upsert({ user_id: 'default', data, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Supabase save error:', err);
+    return false;
+  }
+};
+
+// Combined load function
+const loadData = () => {
+  // Always start with localStorage (instant)
+  return loadDataFromLocal();
+};
+
+// Combined save function
+const saveData = (data) => {
+  // Always save to localStorage first (instant)
+  saveDataToLocal(data);
+  // Then sync to Supabase (async, background)
+  if (supabaseEnabled) {
+    saveDataToSupabase(data);
+  }
 };
 
 // ============================================================
@@ -326,8 +383,26 @@ function SalesPipelineApp() {
   const [selectedContact, setSelectedContact] = useState(null); // For contact profile modal
   const [showCallPanel, setShowCallPanel] = useState(false); // Separate state for call panel (can coexist with modals)
 
-  // Auto-save
+  // Auto-save to localStorage + Supabase
   useEffect(() => { saveData(data); }, [data]);
+
+  // Load from Supabase on startup (if enabled)
+  useEffect(() => {
+    if (supabaseEnabled) {
+      loadDataFromSupabase().then(cloudData => {
+        if (cloudData) {
+          // Merge: cloud data takes precedence if more recent
+          const localData = loadDataFromLocal();
+          const cloudTime = new Date(cloudData.lastUpdated || 0).getTime();
+          const localTime = new Date(localData.lastUpdated || 0).getTime();
+          if (cloudTime > localTime || !localData.lastUpdated) {
+            setData({ ...cloudData, lastUpdated: new Date().toISOString() });
+            console.log("✅ Supabase'den veri yüklendi");
+          }
+        }
+      });
+    }
+  }, []);
 
   // Migrate old pipeline data to new trackingType/status
   useEffect(() => {
@@ -2939,6 +3014,10 @@ function SalesPipelineApp() {
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Cloud Status */}
+          <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, background: supabaseEnabled ? colors.greenDim : colors.yellowDim, color: supabaseEnabled ? colors.green : colors.yellow }} title={supabaseEnabled ? "Cloud sync aktif" : "Sadece yerel kayıt"}>
+            {supabaseEnabled ? "☁️ Cloud" : "💾 Local"}
+          </span>
           <button style={s.btn("primary")} onClick={openAddCompany}><PlusIcon size={14}/> Firma Ekle</button>
           <button style={s.btn()} onClick={() => { setImportType("lusha"); fileInputRef.current?.click(); }}><UploadIcon size={14}/> Lusha</button>
           <button style={s.btn()} onClick={() => { setImportType("avm"); fileInputAvmRef.current?.click(); }}><UploadIcon size={14}/> AVM</button>
