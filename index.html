@@ -1066,17 +1066,6 @@ function SalesPipelineApp() {
             {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
           </div>
           {parent && <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>↳ {parent.name}</div>}
-          {contacts.length > 0 && (
-            <div style={{ fontSize: 10, color: colors.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {contacts[0].name} {contacts[0].phone ? "📞" : contacts[0].email ? "✉️" : "🔗"}
-            </div>
-          )}
-          {contacts.length === 0 && parent && parentContacts.length > 0 && (
-            <div style={{ fontSize: 10, color: colors.yellow }}>Çatı: {parentContacts.length} kontakt</div>
-          )}
-          {contacts.length === 0 && (!parent || parentContacts.length === 0) && (
-            <div style={{ fontSize: 10, color: colors.red }}>Kontakt yok</div>
-          )}
         </div>
       </div>
     );
@@ -2418,13 +2407,40 @@ function SalesPipelineApp() {
             </select>
           </div>
 
+          {/* Device & Notes */}
+          <div style={{ ...s.card, padding: 12, marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Cihaz Durumu</div>
+                <select style={{ ...s.select, width: "100%" }} value={company.deviceStatus || "unknown"} onChange={(e) => updateCompanyField(company.id, "deviceStatus", e.target.value)}>
+                  <option value="unknown">Bilinmiyor</option>
+                  <option value="none">Cihaz Yok</option>
+                  <option value="competitor">Rakip Cihaz Var</option>
+                  <option value="ours">Bizde</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Cihaz Markası</div>
+                <input style={s.input} value={company.deviceBrand || ""} onChange={(e) => updateCompanyField(company.id, "deviceBrand", e.target.value)} placeholder="Marka adı..." disabled={company.deviceStatus !== "competitor"} />
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Kontrat Bitiş Tarihi</div>
+              <input type="date" style={s.input} value={company.contractEndDate || ""} onChange={(e) => updateCompanyField(company.id, "contractEndDate", e.target.value)} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Notlar</div>
+              <textarea style={{ ...s.input, height: 60, resize: "vertical" }} value={company.notes || ""} onChange={(e) => updateCompanyField(company.id, "notes", e.target.value)} placeholder="Firma hakkında notlar..." />
+            </div>
+          </div>
+
           {/* Contacts */}
           <div style={{ fontSize: 11, fontWeight: 700, color: colors.textMuted, marginBottom: 8 }}>KONTAKTLAR ({contacts.length})</div>
           {contacts.length === 0 && <div style={{ color: colors.textDim, fontSize: 12 }}>Henüz kontakt yok</div>}
           {contacts.map(ct => {
             const profile = getProfile(ct.id);
             return (
-              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "grid", gridTemplateColumns: "40px 1.5fr 2.2fr 1fr 1fr 50px", alignItems: "center", gap: 8 }}>
+              <div key={ct.id} style={{ ...s.card, padding: "8px 12px", marginBottom: 4, display: "grid", gridTemplateColumns: "40px 1.5fr 2.2fr minmax(140px, 1fr) 1.5fr 50px", alignItems: "center", gap: 8 }}>
                 {/* 1. Öncelik */}
                 <select style={{ ...s.select, fontSize: 10, padding: "2px 4px" }} value={ct.priority || ""} onChange={(e) => updateContactField(ct.id, "priority", e.target.value ? parseInt(e.target.value) : null)}>
                   <option value="">—</option>
