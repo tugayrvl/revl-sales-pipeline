@@ -248,19 +248,29 @@ const ContactStatusBadge = ({ contact }) => {
 
 const PipelineBadge = ({ stage }) => {
   const map = {
-    new_target: { label: "Yeni Hedef", color: colors.textMuted, bg: colors.surfaceHover },
-    searching_contact: { label: "Kontakt Aranıyor", color: colors.yellow, bg: colors.yellowDim },
     contact_ready: { label: "Kontakt Hazır", color: colors.green, bg: colors.greenDim },
-    called: { label: "Arama Yapıldı", color: colors.accent, bg: colors.accentDim },
-    meeting_scheduled: { label: "Toplantı Alındı", color: colors.purple, bg: "#2d1a4e" },
-    demo_done: { label: "Demo Yapıldı", color: colors.orange, bg: "#3d1e08" },
-    regular_followup: { label: "Düzenli Takip", color: colors.yellow, bg: colors.yellowDim },
+    no_ready_contact: { label: "Hazır Kontakt Yok", color: colors.orange, bg: colors.orangeDim },
     unreached: { label: "Ulaşılamadı", color: colors.red, bg: colors.redDim },
+    wrong_person: { label: "Yanlış Kişi", color: colors.yellow, bg: colors.yellowDim },
+    meeting: { label: "Toplantı Alındı", color: colors.purple, bg: "#2d1a4e" },
     not_interested: { label: "İlgilenmiyor", color: colors.textDim, bg: colors.surfaceHover },
-    closing: { label: "Kapanış Süreci", color: colors.green, bg: colors.greenDim },
-    completed: { label: "Tamamlandı", color: colors.green, bg: colors.greenDim },
   };
   const m = map[stage] || { label: stage || "—", color: colors.textMuted, bg: colors.surfaceHover };
+  return <Badge color={m.color} bg={m.bg}>{m.label}</Badge>;
+};
+
+const StatusBadge = ({ status, hasPhoneContact }) => {
+  // Auto-determine if no manual status set
+  const effectiveStatus = status || (hasPhoneContact ? "contact_ready" : "no_ready_contact");
+  const map = {
+    contact_ready: { label: "Kontakt Hazır", color: colors.green, bg: colors.greenDim },
+    no_ready_contact: { label: "Hazır Kontakt Yok", color: colors.orange, bg: colors.orangeDim },
+    unreached: { label: "Ulaşılamadı", color: colors.red, bg: colors.redDim },
+    wrong_person: { label: "Yanlış Kişi", color: colors.yellow, bg: colors.yellowDim },
+    meeting: { label: "Toplantı Alındı", color: colors.purple, bg: "#2d1a4e" },
+    not_interested: { label: "İlgilenmiyor", color: colors.textDim, bg: colors.surfaceHover },
+  };
+  const m = map[effectiveStatus] || { label: "—", color: colors.textMuted, bg: colors.surfaceHover };
   return <Badge color={m.color} bg={m.bg}>{m.label}</Badge>;
 };
 
@@ -319,6 +329,33 @@ function SalesPipelineApp() {
   // Auto-save
   useEffect(() => { saveData(data); }, [data]);
 
+  // Migrate old pipeline data to new trackingType/status
+  useEffect(() => {
+    let needsMigration = false;
+    const migratedCompanies = data.companies.map(c => {
+      if (c.pipeline && !c.trackingType) {
+        needsMigration = true;
+        const migrated = { ...c };
+        // Migrate pipeline to trackingType
+        if (c.pipeline === "regular_followup") {
+          migrated.trackingType = "followup";
+        } else if (c.targetWeek) {
+          migrated.trackingType = "target";
+        }
+        // Migrate pipeline to status
+        if (c.pipeline === "contact_ready") migrated.status = "contact_ready";
+        else if (c.pipeline === "unreached") migrated.status = "unreached";
+        else if (c.pipeline === "meeting_scheduled") migrated.status = "meeting";
+        else if (c.pipeline === "not_interested") migrated.status = "not_interested";
+        return migrated;
+      }
+      return c;
+    });
+    if (needsMigration) {
+      setData(prev => ({ ...prev, companies: migratedCompanies }));
+    }
+  }, []);
+
   const showSync = useCallback((msg) => {
     setSyncNotif(msg || "Kaydedildi ✓");
     setTimeout(() => setSyncNotif(false), 2000);
@@ -334,18 +371,18 @@ function SalesPipelineApp() {
 
   // ---- DERIVED DATA ----
   const weekCompanies = useMemo(() =>
-    data.companies.filter(c => c.targetWeek === selectedWeek && c.targetYear === currentYear),
+    data.companies.filter(c => c.trackingType === "target" && c.targetWeek === selectedWeek && c.targetYear === currentYear),
     [data.companies, selectedWeek]
   );
 
   const followupCompanies = useMemo(() =>
-    data.companies.filter(c => c.pipeline === "regular_followup" && c.followupWeek === selectedWeek && c.followupYear === currentYear),
+    data.companies.filter(c => c.trackingType === "followup" && c.followupWeek === selectedWeek && c.followupYear === currentYear),
     [data.companies, selectedWeek]
   );
 
   // Also include followups that don't have a specific week assigned but are active
   const allFollowups = useMemo(() =>
-    data.companies.filter(c => c.pipeline === "regular_followup"),
+    data.companies.filter(c => c.trackingType === "followup"),
     [data.companies]
   );
 
@@ -734,9 +771,9 @@ function SalesPipelineApp() {
       // Auto-update pipeline to "contact_ready" if phone provided
       if (modalData.phone) {
         const company = prev.companies.find(c => c.id === modalData.companyId);
-        if (company && (company.pipeline === "new_target" || company.pipeline === "searching_contact")) {
+        if (company && (!company.status || company.status === "no_ready_contact")) {
           updatedCompanies = prev.companies.map(c =>
-            c.id === modalData.companyId ? { ...c, pipeline: "contact_ready" } : c
+            c.id === modalData.companyId ? { ...c, status: "contact_ready" } : c
           );
         }
       }
@@ -761,13 +798,14 @@ function SalesPipelineApp() {
   const saveCallLog = () => {
     updateData(prev => {
       const next = { ...prev, callLogs: [...prev.callLogs, { ...callResult, id: uid() }] };
-      // Update pipeline
+      // Update status
       const comp = next.companies.find(c => c.id === callResult.companyId);
       if (comp) {
-        if (callResult.result === "meeting") comp.pipeline = "meeting_scheduled";
-        else if (callResult.result === "introduced") comp.pipeline = "regular_followup";
-        else if (callResult.result === "unreached") comp.pipeline = "unreached";
-        else if (callResult.result === "not_interested") comp.pipeline = "not_interested";
+        if (callResult.result === "meeting") comp.status = "meeting";
+        else if (callResult.result === "introduced") { comp.status = "contact_ready"; comp.trackingType = "followup"; }
+        else if (callResult.result === "unreached") comp.status = "unreached";
+        else if (callResult.result === "wrong_number") comp.status = "wrong_person";
+        else if (callResult.result === "not_interested") comp.status = "not_interested";
       }
       // Update contact status when reached
       if (callResult.result === "introduced" || callResult.result === "meeting") {
@@ -883,6 +921,17 @@ function SalesPipelineApp() {
     if (["deviceStatus", "deviceBrand", "contractEndDate"].includes(field)) {
       showSync("Cihaz bilgisi kaydedildi ✓");
     }
+    if (field === "trackingType") {
+      const trackingLabels = { target: "Hedef Firma", followup: "Düzenli Takip" };
+      showSync(`Kategori: ${trackingLabels[value] || "Kaldırıldı"} ✓`);
+    }
+    if (field === "status") {
+      const statusLabels = { contact_ready: "Kontakt Hazır", no_ready_contact: "Hazır Kontakt Yok", unreached: "Ulaşılamadı", wrong_person: "Yanlış Kişi", meeting: "Toplantı Alındı", not_interested: "İlgilenmiyor" };
+      showSync(`Durum: ${statusLabels[value] || value} ✓`);
+    }
+    if (field === "targetWeek") {
+      showSync(`Hedef Hafta: H${value} ✓`);
+    }
   };
 
   const updateContactField = (contactId, field, value) => {
@@ -895,9 +944,9 @@ function SalesPipelineApp() {
       // Auto-update pipeline to "contact_ready" if phone added
       if (field === "phone" && value && contact) {
         const company = prev.companies.find(c => c.id === contact.companyId);
-        if (company && (company.pipeline === "new_target" || company.pipeline === "searching_contact")) {
+        if (company && (!company.status || company.status === "no_ready_contact")) {
           updatedCompanies = prev.companies.map(c =>
-            c.id === contact.companyId ? { ...c, pipeline: "contact_ready" } : c
+            c.id === contact.companyId ? { ...c, status: "contact_ready" } : c
           );
         }
       }
@@ -1079,7 +1128,7 @@ function SalesPipelineApp() {
             )}
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-            <PipelineBadge stage={company.pipeline} />
+            <StatusBadge status={company.status} hasPhoneContact={hasPhone} />
             {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
           </div>
           {parent && <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>↳ {parent.name}</div>}
@@ -1175,8 +1224,13 @@ function SalesPipelineApp() {
   // ============================================================
 
   const renderDashboard = () => {
-    const pipelineCounts = {};
-    data.companies.forEach(c => { pipelineCounts[c.pipeline] = (pipelineCounts[c.pipeline] || 0) + 1; });
+    const trackingCounts = { target: 0, followup: 0, none: 0 };
+    const statusCounts = {};
+    data.companies.forEach(c => {
+      trackingCounts[c.trackingType || "none"]++;
+      const effectiveStatus = c.status || (data.contacts.some(ct => ct.companyId === c.id && ct.phone) ? "contact_ready" : "no_ready_contact");
+      statusCounts[effectiveStatus] = (statusCounts[effectiveStatus] || 0) + 1;
+    });
     const parentComps = data.companies.filter(c => c.isParent);
 
     return (
@@ -1244,7 +1298,7 @@ function SalesPipelineApp() {
               <div key={c.id} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: colors.red }}>●</span>
                 <span>{c.name}</span>
-                <PipelineBadge stage={c.pipeline} />
+                <StatusBadge status={c.status} hasPhoneContact={false} />
               </div>
             ))}
           </div>
@@ -1370,7 +1424,7 @@ function SalesPipelineApp() {
                       </select>
                     </td>
                     <td style={s.td}><DeviceBadge status={c.deviceStatus} brand={c.deviceBrand}/></td>
-                    <td style={s.td}><PipelineBadge stage={c.pipeline}/></td>
+                    <td style={s.td}><StatusBadge status={c.status} hasPhoneContact={hasPhone}/></td>
                     <td style={s.td}>
                       <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
                         {hasPhone && <Badge color={colors.green} bg={colors.greenDim}>📞 {cts.filter(ct=>ct.phone).length}</Badge>}
@@ -1402,14 +1456,14 @@ function SalesPipelineApp() {
                     <td style={s.td}>
                       <button
                         style={{
-                          ...s.btn(c.pipeline === "regular_followup" ? "success" : "default"),
+                          ...s.btn(c.trackingType === "followup" ? "success" : "default"),
                           padding: "3px 10px",
                           fontSize: 11
                         }}
-                        onClick={() => updateCompanyField(c.id, "pipeline", c.pipeline === "regular_followup" ? "new_target" : "regular_followup")}
-                        title={c.pipeline === "regular_followup" ? "Düzenli takipten çıkar" : "Düzenli takibe ekle"}
+                        onClick={() => updateCompanyField(c.id, "trackingType", c.trackingType === "followup" ? null : "followup")}
+                        title={c.trackingType === "followup" ? "Düzenli takipten çıkar" : "Düzenli takibe ekle"}
                       >
-                        {c.pipeline === "regular_followup" ? "✓ Takipte" : "+ Takip"}
+                        {c.trackingType === "followup" ? "✓ Takipte" : "+ Takip"}
                       </button>
                     </td>
                     <td style={s.td}>
@@ -1494,23 +1548,23 @@ function SalesPipelineApp() {
       const logs = getCallLogs(c.id);
       const lastLog = logs[0];
 
-      if (c.pipeline === "new_target" && cts.length === 0) {
+      if (c.trackingType === "target" && cts.length === 0) {
         autoTodos.push({ id: `auto-${c.id}-contact`, type: "auto", priority: 1, text: `Kontakt bul: ${c.name}`, company: c.name, companyId: c.id, category: "kontakt" });
       }
-      if (c.pipeline === "new_target" && cts.length > 0 && !hasPhone) {
+      if (c.trackingType === "target" && cts.length > 0 && !hasPhone) {
         autoTodos.push({ id: `auto-${c.id}-phone`, type: "auto", priority: 2, text: `Telefon bul: ${c.name} (${cts.length} kontakt var, tel yok)`, company: c.name, companyId: c.id, category: "kontakt" });
       }
-      if (c.pipeline === "contact_ready" && c.targetWeek === selectedWeek) {
+      if ((c.status === "contact_ready" || (!c.status && hasPhone)) && c.targetWeek === selectedWeek) {
         autoTodos.push({ id: `auto-${c.id}-call`, type: "auto", priority: 1, text: `Ara: ${c.name}`, company: c.name, companyId: c.id, category: "arama" });
       }
-      if (c.pipeline === "unreached") {
+      if (c.status === "unreached") {
         autoTodos.push({ id: `auto-${c.id}-retry`, type: "auto", priority: 3, text: `Tekrar ara: ${c.name}`, company: c.name, companyId: c.id, category: "arama" });
       }
-      if (c.pipeline === "regular_followup") {
+      if (c.trackingType === "followup") {
         const daysSince = lastLog ? Math.floor((Date.now() - new Date(lastLog.date)) / 86400000) : 999;
         autoTodos.push({ id: `auto-${c.id}-followup`, type: "auto", priority: daysSince > 7 ? 1 : 3, text: `Takip araması: ${c.name} (${daysSince} gün oldu)`, company: c.name, companyId: c.id, category: "takip" });
       }
-      if (c.pipeline === "meeting_scheduled") {
+      if (c.status === "meeting") {
         autoTodos.push({ id: `auto-${c.id}-meeting`, type: "auto", priority: 1, text: `Toplantı: ${c.name}`, company: c.name, companyId: c.id, category: "toplantı" });
       }
     });
@@ -2419,12 +2473,38 @@ function SalesPipelineApp() {
             {company.linkedin && <a href={company.linkedin} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none" }}><LinkedinIcon size={14}/> LinkedIn</a>}
             {company.website && <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none" }}><GlobeIcon size={14}/> Website</a>}
             <button style={s.btn()} onClick={() => openAddContact(company.id)}><PlusIcon size={14}/> Kontakt Ekle</button>
-            <select style={s.select} value={company.pipeline} onChange={(e) => updateCompanyField(company.id, "pipeline", e.target.value)}>
-              <option value="new_target">Yeni Hedef</option>
+          </div>
+
+          {/* Category & Status */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <select style={s.select} value={company.trackingType || ""} onChange={(e) => {
+              const val = e.target.value;
+              updateCompanyField(company.id, "trackingType", val || null);
+              if (val === "target" && !company.targetWeek) {
+                updateCompanyField(company.id, "targetWeek", currentWeek);
+                updateCompanyField(company.id, "targetYear", currentYear);
+              }
+            }}>
+              <option value="">Kategori Seç</option>
+              <option value="target">Hedef Firma</option>
+              <option value="followup">Düzenli Takip</option>
+            </select>
+            {company.trackingType === "target" && (
+              <select style={{ ...s.select, minWidth: 70 }} value={company.targetWeek || currentWeek} onChange={(e) => {
+                updateCompanyField(company.id, "targetWeek", parseInt(e.target.value));
+                updateCompanyField(company.id, "targetYear", currentYear);
+              }}>
+                {[...Array(6)].map((_, i) => (
+                  <option key={i} value={currentWeek + i}>H{currentWeek + i}</option>
+                ))}
+              </select>
+            )}
+            <select style={s.select} value={company.status || (contacts.some(c => c.phone) ? "contact_ready" : "no_ready_contact")} onChange={(e) => updateCompanyField(company.id, "status", e.target.value)}>
               <option value="contact_ready">Kontakt Hazır</option>
-              <option value="meeting_scheduled">Toplantı Alındı</option>
-              <option value="regular_followup">Düzenli Takip</option>
+              <option value="no_ready_contact">Hazır Kontakt Yok</option>
               <option value="unreached">Ulaşılamadı</option>
+              <option value="wrong_person">Ulaşıldı - Yanlış Kişi</option>
+              <option value="meeting">Toplantı Alındı</option>
               <option value="not_interested">İlgilenmiyor</option>
             </select>
           </div>
