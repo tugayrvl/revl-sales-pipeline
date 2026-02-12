@@ -799,6 +799,14 @@ function SalesPipelineApp() {
     showSync("Kontakt silindi ✓");
   };
 
+  const deleteCallLog = (logId) => {
+    updateData(prev => ({
+      ...prev,
+      callLogs: prev.callLogs.filter(l => l.id !== logId)
+    }));
+    showSync("Arama logu silindi ✓");
+  };
+
   const openCallLog = (company, contact) => {
     setCallResult({ companyId: company.id, contactId: contact.id, contactName: contact.name, companyName: company.name, phone: contact.phone, result: "", notes: "", meetingDate: "", date: new Date().toISOString(), week: selectedWeek, year: currentYear });
     setShowCallPanel(true);
@@ -2828,6 +2836,7 @@ function SalesPipelineApp() {
                       {resultLabels[log.result] || log.result}
                     </Badge>
                     <button style={{ ...s.btn(), padding: "2px 6px", fontSize: 10 }} onClick={() => setViewingCallLog(log)} title="Detayları gör">📋</button>
+                    <button style={{ ...s.btn("danger"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteCallLog(log.id)} title="Sil">🗑️</button>
                   </div>
                 );
               })}
@@ -2873,6 +2882,7 @@ function SalesPipelineApp() {
                 <span style={{ color: colors.textDim, minWidth: 70 }}>{new Date(log.date).toLocaleDateString("tr")} {new Date(log.date).toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}</span>
                 <span style={{ flex: 1, color: log.result === "meeting" ? colors.green : log.result === "introduced" ? colors.yellow : colors.red }}>{resultLabels[log.result] || log.result}</span>
                 <button style={{ ...s.btn(), padding: "2px 6px", fontSize: 10 }} onClick={() => setViewingCallLog(log)} title="Detayları gör">📋</button>
+                <button style={{ ...s.btn("danger"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteCallLog(log.id)} title="Sil">🗑️</button>
               </div>
             ))}
           </div>
