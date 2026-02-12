@@ -105,9 +105,9 @@ const getWeekDates = (week, year = currentYear) => {
 
 const STORAGE_KEY = "sales_pipeline_data";
 
-// ⚠️ SUPABASE CONFIG - Kendi bilgilerinle değiştir!
-const SUPABASE_URL = "https://your-project.supabase.co"; // Buraya kendi URL'ini yaz
-const SUPABASE_ANON_KEY = "your-anon-key"; // Buraya kendi key'ini yaz
+// SUPABASE CONFIG
+const SUPABASE_URL = "https://iubcsyguegffxloclugj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1YmNzeWd1ZWdmZnhsb2NsdWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4OTAyNjQsImV4cCI6MjA4NjQ2NjI2NH0.JshsW4YcZtSpNmraPHy4k1cyYiGUNgMwgSDSIBG98JA";
 
 // Supabase client (sadece config doğruysa aktif)
 const supabaseEnabled = SUPABASE_URL !== "https://your-project.supabase.co" && SUPABASE_ANON_KEY !== "your-anon-key";
