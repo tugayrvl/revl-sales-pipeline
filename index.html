@@ -2407,31 +2407,29 @@ function SalesPipelineApp() {
             </select>
           </div>
 
-          {/* Device & Notes */}
-          <div style={{ ...s.card, padding: 12, marginBottom: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div>
-                <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Cihaz Durumu</div>
-                <select style={{ ...s.select, width: "100%" }} value={company.deviceStatus || "unknown"} onChange={(e) => updateCompanyField(company.id, "deviceStatus", e.target.value)}>
-                  <option value="unknown">Bilinmiyor</option>
-                  <option value="none">Cihaz Yok</option>
-                  <option value="competitor">Rakip Cihaz Var</option>
-                  <option value="ours">Bizde</option>
-                </select>
-              </div>
-              <div>
+          {/* Device Info */}
+          <div style={{ ...s.card, padding: 12, marginBottom: 12, display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Cihaz Durumu</div>
+              <select style={{ ...s.select, width: "100%" }} value={company.deviceStatus || "unknown"} onChange={(e) => updateCompanyField(company.id, "deviceStatus", e.target.value)}>
+                <option value="unknown">Bilinmiyor</option>
+                <option value="none">Cihaz Yok</option>
+                <option value="competitor">Rakip Cihaz Var</option>
+                <option value="ours">Bizde</option>
+              </select>
+            </div>
+            {company.deviceStatus === "competitor" && (
+              <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Cihaz Markası</div>
-                <input style={s.input} value={company.deviceBrand || ""} onChange={(e) => updateCompanyField(company.id, "deviceBrand", e.target.value)} placeholder="Marka adı..." disabled={company.deviceStatus !== "competitor"} />
+                <input style={s.input} value={company.deviceBrand || ""} onChange={(e) => updateCompanyField(company.id, "deviceBrand", e.target.value)} placeholder="Marka adı..." />
               </div>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Kontrat Bitiş Tarihi</div>
-              <input type="date" style={s.input} value={company.contractEndDate || ""} onChange={(e) => updateCompanyField(company.id, "contractEndDate", e.target.value)} />
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Notlar</div>
-              <textarea style={{ ...s.input, height: 60, resize: "vertical" }} value={company.notes || ""} onChange={(e) => updateCompanyField(company.id, "notes", e.target.value)} placeholder="Firma hakkında notlar..." />
-            </div>
+            )}
+            {company.deviceStatus === "competitor" && company.deviceBrand && (
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Kontrat Bitiş</div>
+                <input type="date" style={s.input} value={company.contractEndDate || ""} onChange={(e) => updateCompanyField(company.id, "contractEndDate", e.target.value)} />
+              </div>
+            )}
           </div>
 
           {/* Contacts */}
