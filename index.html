@@ -661,8 +661,13 @@ function SalesPipelineApp({ onLogout }) {
 
   // Scroll company panel to top when switching companies
   useEffect(() => {
-    if (expandedFirm && companyPanelRef.current) {
-      companyPanelRef.current.scrollTop = 0;
+    if (expandedFirm) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        if (companyPanelRef.current) {
+          companyPanelRef.current.scrollTop = 0;
+        }
+      }, 50);
     }
   }, [expandedFirm]);
 
