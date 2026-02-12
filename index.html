@@ -1105,7 +1105,12 @@ function SalesPipelineApp({ onLogout }) {
         if (comp.id === callResult.companyId) {
           const updated = { ...comp };
           if (callResult.result === "meeting") updated.status = "meeting";
-          else if (callResult.result === "introduced") { updated.status = "contact_ready"; updated.trackingType = "followup"; }
+          else if (callResult.result === "introduced") {
+            updated.status = "contact_ready";
+            updated.trackingType = "followup";
+            // Track when company first entered Düzenli Takip
+            if (!updated.followupStartDate) updated.followupStartDate = new Date().toISOString();
+          }
           else if (callResult.result === "unreached") updated.status = "unreached";
           else if (callResult.result === "wrong_number") updated.status = "wrong_person";
           else if (callResult.result === "not_interested") updated.status = "not_interested";
@@ -1222,7 +1227,15 @@ function SalesPipelineApp({ onLogout }) {
   const updateCompanyField = (companyId, field, value) => {
     updateData(prev => ({
       ...prev,
-      companies: prev.companies.map(c => c.id === companyId ? { ...c, [field]: value } : c)
+      companies: prev.companies.map(c => {
+        if (c.id !== companyId) return c;
+        const updated = { ...c, [field]: value };
+        // Track when company first enters Düzenli Takip
+        if (field === "trackingType" && value === "followup" && !c.followupStartDate) {
+          updated.followupStartDate = new Date().toISOString();
+        }
+        return updated;
+      })
     }));
     if (["deviceStatus", "deviceBrand", "contractEndDate"].includes(field)) {
       showSync("Cihaz bilgisi kaydedildi ✓");
@@ -1410,13 +1423,56 @@ function SalesPipelineApp({ onLogout }) {
     const parent = getParentCompany(company.id);
     const parentContacts = parent ? getContacts(parent.id) : [];
 
+    // Check if company was called this week (within selected week's date range)
+    const companyCallLogs = data.callLogs.filter(l => l.companyId === company.id);
+    const calledThisWeek = companyCallLogs.some(l => {
+      const callDate = new Date(l.date);
+      return callDate >= weekDates.monday && callDate <= weekDates.sunday;
+    });
+
+    // Calculate days since last call (for followup badge)
+    let daysSinceLastCall = null;
+    let daysInFollowup = null;
+    if (type === "followup" && companyCallLogs.length > 0) {
+      const lastCallDate = new Date(Math.max(...companyCallLogs.map(l => new Date(l.date).getTime())));
+      daysSinceLastCall = Math.floor((new Date() - lastCallDate) / (1000 * 60 * 60 * 24));
+    }
+    if (type === "followup" && company.followupStartDate) {
+      daysInFollowup = Math.floor((new Date() - new Date(company.followupStartDate)) / (1000 * 60 * 60 * 24));
+    }
+
+    // Determine background color based on action needed
+    // For Hedef Firmalar: highlight if no contacts (need to find contacts)
+    // For Düzenli Takip: highlight if NOT called this week (need to call)
+    let needsAction = false;
+    if (type === "target" && !hasAny) needsAction = true; // No contacts
+    if (type === "followup" && !calledThisWeek) needsAction = true; // Not called this week
+
+    const cardBg = needsAction ? "rgba(255, 200, 100, 0.08)" : s.card.background;
+
     return (
-      <div key={company.id} style={{ ...s.card, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0 }}>
+      <div key={company.id} style={{ ...s.card, background: cardBg, borderLeft: `3px solid ${statusColor}`, cursor: "pointer", minWidth: 0, position: "relative" }}>
+        {/* Followup Badge - Days since last call / Days in followup */}
+        {type === "followup" && daysInFollowup !== null && (
+          <div style={{
+            position: "absolute",
+            top: 4,
+            right: 4,
+            fontSize: 9,
+            fontWeight: 600,
+            color: daysSinceLastCall > 14 ? colors.red : daysSinceLastCall > 7 ? colors.orange : colors.textMuted,
+            background: colors.surfaceHover,
+            padding: "2px 5px",
+            borderRadius: 4,
+          }}>
+            {daysSinceLastCall !== null ? `${daysSinceLastCall}/` : ""}{daysInFollowup} gün
+          </div>
+        )}
         <div onClick={() => openCompanyDetail(company)}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: 12 }}>{statusDot}</span>
-              <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={company.name}>{company.name}</span>
+              <span style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: type === "followup" ? 50 : 0 }} title={company.name}>{company.name}</span>
             </div>
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
@@ -1432,6 +1488,7 @@ function SalesPipelineApp({ onLogout }) {
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
             <StatusBadge status={company.status} hasPhoneContact={hasPhone} />
             {type === "followup" && <Badge color={colors.orange} bg="#3d1e08">Takip</Badge>}
+            {type === "followup" && calledThisWeek && <Badge color={colors.green} bg={colors.greenDim}>✓ Arandı</Badge>}
           </div>
           {parent && <div style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>↳ {parent.name}</div>}
           {company.deviceStatus && company.deviceStatus !== "unknown" && (
