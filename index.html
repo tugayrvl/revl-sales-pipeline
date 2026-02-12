@@ -582,6 +582,7 @@ function SalesPipelineApp({ onLogout }) {
   const [callResult, setCallResult] = useState(null);
   const fileInputRef = useRef(null);
   const fileInputAvmRef = useRef(null);
+  const companyPanelRef = useRef(null);
   const [importType, setImportType] = useState("lusha");
   const [weekFilter, setWeekFilter] = useState("all"); // "all" | "ready" | "no_contact" | "followup"
   const [companyFilter, setCompanyFilter] = useState({ device: "all", phone: "all", assigned: "all" }); // device: all|none|competitor, phone: all|has_phone|no_phone, assigned: all|unassigned|assigned
@@ -657,6 +658,13 @@ function SalesPipelineApp({ onLogout }) {
       setData(prev => ({ ...prev, companies: migratedCompanies }));
     }
   }, []);
+
+  // Scroll company panel to top when switching companies
+  useEffect(() => {
+    if (expandedFirm && companyPanelRef.current) {
+      companyPanelRef.current.scrollTop = 0;
+    }
+  }, [expandedFirm]);
 
   const showSync = useCallback((msg) => {
     setSyncNotif(msg || "Kaydedildi ✓");
@@ -3142,7 +3150,7 @@ function SalesPipelineApp({ onLogout }) {
           </div>
           <button style={s.btn("danger")} onClick={() => setExpandedFirm(null)}><XIcon size={16}/></button>
         </div>
-        <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+        <div ref={companyPanelRef} style={{ flex: 1, padding: 16, overflowY: "auto" }}>
           {/* Quick Links */}
           <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
             {company.linkedin && <a href={company.linkedin} target="_blank" rel="noopener noreferrer" style={{ ...s.btn(), textDecoration: "none" }}><LinkedinIcon size={14}/> LinkedIn</a>}
