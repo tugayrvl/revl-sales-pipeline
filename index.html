@@ -2139,6 +2139,7 @@ function SalesPipelineApp({ onLogout }) {
               <div style={{ fontSize: 13, fontWeight: 700, color: week === "unassigned" ? colors.textDim : week == currentWeek ? colors.green : colors.accent, marginBottom: 8 }}>
                 {week === "unassigned" ? "📌 Hafta Atanmamış" : `📅 Hafta ${week}${week == currentWeek ? " (Bu Hafta)" : ""}`} ({items.length})
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
               {items.map(todo => {
                 const dateStr = todo.targetDate ? new Date(todo.targetDate).toLocaleDateString("tr", { day: "numeric", month: "short" }) : null;
                 const isToday = todo.targetDate === new Date().toISOString().split("T")[0];
@@ -2189,6 +2190,7 @@ function SalesPipelineApp({ onLogout }) {
                   </div>
                 );
               })}
+              </div>
             </div>
           ))}
 
@@ -2196,8 +2198,9 @@ function SalesPipelineApp({ onLogout }) {
         {doneTodos.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: colors.green, marginBottom: 8 }}>✅ Tamamlanan ({doneTodos.length})</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
             {doneTodos.slice(0, 10).map(todo => (
-              <div key={todo.id} style={{ ...s.card, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, opacity: 0.5, marginBottom: 4 }}>
+              <div key={todo.id} style={{ ...s.card, padding: "8px 14px", display: "flex", alignItems: "center", gap: 10, opacity: 0.5 }}>
                 <input type="checkbox" checked={true} onChange={() => {
                   updateData(prev => ({
                     ...prev,
@@ -2210,6 +2213,7 @@ function SalesPipelineApp({ onLogout }) {
                 }}><TrashIcon size={10}/></button>
               </div>
             ))}
+            </div>
             {doneTodos.length > 10 && <div style={{ fontSize: 11, color: colors.textDim, marginTop: 4 }}>+{doneTodos.length - 10} daha...</div>}
           </div>
         )}
