@@ -3117,6 +3117,7 @@ function SalesPipelineApp({ onLogout }) {
             { id: "campaigns", label: "🚀 Kampanya Oluştur" },
             { id: "queue", label: `📤 Kuyruk (${queuedEmails.length})` },
             { id: "logs", label: "📊 Loglar" },
+            { id: "tracking", label: "📈 Kampanya Takip" },
           ].map(t => (
             <button key={t.id} style={{ ...s.btn(coldMailTab === t.id ? "primary" : "default"), fontSize: 12 }} onClick={() => setColdMailTab(t.id)}>{t.label}</button>
           ))}
@@ -3395,11 +3396,6 @@ function SalesPipelineApp({ onLogout }) {
                 </select>
               </div>
 
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Cevap gelmezse kaç gün sonra follow-up?</label>
-                <input type="number" style={s.input} value={campaignSettings.followUpDays} onChange={e => setCampaignSettings({ ...campaignSettings, followUpDays: parseInt(e.target.value) || 5 })} min={1} max={30} />
-              </div>
-
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>📅 Haftalık Program</div>
 
               {dayKeys.map(dayKey => {
@@ -3532,6 +3528,173 @@ function SalesPipelineApp({ onLogout }) {
             )}
           </div>
         )}
+
+        {/* Tracking Tab - Campaign Follow-up */}
+        {coldMailTab === "tracking" && (() => {
+          const sentEmails = sends.filter(s => s.status === "sent");
+          const today = new Date();
+
+          // Calculate days since sent
+          const trackingData = sentEmails.map(send => {
+            const contact = data.contacts.find(c => c.id === send.contactId);
+            const company = data.companies.find(c => c.id === send.companyId);
+            const sentDate = new Date(send.sentAt || send.createdAt);
+            const daysSince = Math.floor((today - sentDate) / (1000 * 60 * 60 * 24));
+            return { ...send, contact, company, sentDate, daysSince };
+          }).sort((a, b) => b.daysSince - a.daysSince);
+
+          // Group by urgency
+          const urgent = trackingData.filter(t => t.daysSince >= 5);
+          const waiting = trackingData.filter(t => t.daysSince < 5 && t.daysSince >= 2);
+          const recent = trackingData.filter(t => t.daysSince < 2);
+
+          const [followUpTemplate, setFollowUpTemplate] = React.useState("");
+          const [selectedForFollowUp, setSelectedForFollowUp] = React.useState([]);
+
+          const startFollowUp = () => {
+            if (selectedForFollowUp.length === 0) {
+              alert("En az bir kontakt seçin");
+              return;
+            }
+            if (!followUpTemplate) {
+              alert("Şablon seçin");
+              return;
+            }
+            const template = templates.find(t => t.id === followUpTemplate);
+            if (!template) return;
+
+            const newSends = selectedForFollowUp.map(sendId => {
+              const original = sends.find(s => s.id === sendId);
+              const contact = data.contacts.find(c => c.id === original?.contactId);
+              const company = data.companies.find(c => c.id === original?.companyId);
+
+              return {
+                id: uid(),
+                contactId: original?.contactId,
+                companyId: original?.companyId,
+                templateId: template.id,
+                email: original?.email,
+                subject: replaceTemplatePlaceholders(template.subject, contact, company),
+                body: replaceTemplatePlaceholders(template.body, contact, company),
+                attachments: (template.attachmentIds || []).map(id => fileLibrary.find(f => f.id === id)).filter(Boolean),
+                status: "queued",
+                scheduledAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+                isFollowUp: true,
+                originalSendId: sendId
+              };
+            });
+
+            updateData(prev => ({
+              ...prev,
+              coldMailSends: [...(prev.coldMailSends || []), ...newSends]
+            }));
+
+            // Mark originals as followed up
+            updateData(prev => ({
+              ...prev,
+              coldMailSends: prev.coldMailSends.map(s =>
+                selectedForFollowUp.includes(s.id) ? { ...s, followedUp: true } : s
+              )
+            }));
+
+            setSelectedForFollowUp([]);
+            setColdMailTab("queue");
+            showSync(`${newSends.length} follow-up mail kuyruğa eklendi ✓`);
+          };
+
+          const renderTrackingGroup = (items, title, color, icon) => {
+            if (items.length === 0) return null;
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 8 }}>{icon} {title} ({items.length})</div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {items.filter(t => !t.followedUp).map(item => (
+                    <div key={item.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedForFollowUp.includes(item.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedForFollowUp(prev => [...prev, item.id]);
+                          } else {
+                            setSelectedForFollowUp(prev => prev.filter(id => id !== item.id));
+                          }
+                        }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{item.contact?.name || "—"}</div>
+                        <div style={{ fontSize: 11, color: colors.textMuted }}>{item.company?.name || "—"} • {item.email}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: item.daysSince >= 5 ? colors.red : item.daysSince >= 3 ? colors.orange : colors.textMuted }}>
+                          {item.daysSince} gün
+                        </div>
+                        <div style={{ fontSize: 10, color: colors.textDim }}>
+                          {item.sentDate.toLocaleDateString("tr", { day: "numeric", month: "short" })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+              {/* Left: Tracking List */}
+              <div>
+                {renderTrackingGroup(urgent, "Yanıt Bekliyor (5+ gün)", colors.red, "🔴")}
+                {renderTrackingGroup(waiting, "Takipte (2-4 gün)", colors.orange, "🟡")}
+                {renderTrackingGroup(recent, "Yeni Gönderildi (0-1 gün)", colors.green, "🟢")}
+
+                {sentEmails.length === 0 && (
+                  <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 40 }}>
+                    Henüz gönderilmiş mail yok. Önce bir kampanya başlatın.
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Follow-up Action */}
+              <div style={s.card}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Follow-up Kampanya</div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Şablon Seç</label>
+                  <select style={s.select} value={followUpTemplate} onChange={e => setFollowUpTemplate(e.target.value)}>
+                    <option value="">— Follow-up Şablonu —</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 12 }}>
+                  {selectedForFollowUp.length > 0
+                    ? `${selectedForFollowUp.length} kontakt seçildi`
+                    : "Soldan kontakt seçin"}
+                </div>
+
+                <button
+                  style={{ ...s.btn("primary"), width: "100%" }}
+                  onClick={startFollowUp}
+                  disabled={selectedForFollowUp.length === 0 || !followUpTemplate}
+                >
+                  🔄 Follow-up Gönder ({selectedForFollowUp.length})
+                </button>
+
+                <div style={{ marginTop: 16, padding: 12, background: colors.surfaceHover, borderRadius: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>İstatistikler</div>
+                  <div style={{ fontSize: 11, color: colors.textMuted }}>
+                    <div>📤 Gönderilen: {sentEmails.length}</div>
+                    <div>✅ Cevap Gelen: {sends.filter(s => s.status === "replied").length}</div>
+                    <div>🔄 Follow-up Yapılan: {sends.filter(s => s.followedUp).length}</div>
+                    <div>⏳ Bekleyen (5+ gün): {urgent.filter(u => !u.followedUp).length}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   };
