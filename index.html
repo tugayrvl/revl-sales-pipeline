@@ -11,6 +11,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0e17; overflow: auto; }
@@ -320,6 +321,33 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseEnabled = SUPABASE_URL !== "https://your-project.supabase.co" && SUPABASE_ANON_KEY !== "your-anon-key";
 const supabase = supabaseEnabled ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// MICROSOFT GRAPH API CONFIG
+const MS_CLIENT_ID = "e5b5ae7b-0b95-4955-8e99-ee50bf1209f8";
+const MS_TENANT_ID = "c712af62-9a4b-43a1-992e-9184d700f5b2";
+const MS_REDIRECT_URI = window.location.origin;
+const MS_SCOPES = ["Mail.Send", "Mail.Read", "User.Read"];
+
+// MSAL Configuration
+const msalConfig = {
+  auth: {
+    clientId: MS_CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
+    redirectUri: MS_REDIRECT_URI,
+  },
+  cache: {
+    cacheLocation: "localStorage",
+    storeAuthStateInCookie: false,
+  }
+};
+
+// Initialize MSAL instance
+let msalInstance = null;
+try {
+  msalInstance = new msal.PublicClientApplication(msalConfig);
+} catch (e) {
+  console.warn("MSAL initialization failed:", e);
+}
+
 const defaultData = () => ({
   companies: [],
   contacts: [],
@@ -328,6 +356,7 @@ const defaultData = () => ({
   todos: [],
   competitors: [],
   coldMailTemplates: [],
+  coldMailCampaigns: [],
   coldMailSends: [],
   linkedinOutreach: [],
   avmVisits: [],
@@ -2303,6 +2332,549 @@ function SalesPipelineApp({ onLogout }) {
   };
 
   // ============================================================
+  // COLD MAIL PAGE
+  // ============================================================
+
+  const [msAccount, setMsAccount] = useState(null);
+  const [coldMailTab, setColdMailTab] = useState("templates"); // templates, campaigns, queue, logs
+  const [editingTemplate, setEditingTemplate] = useState(null);
+  const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "" });
+  const [selectedCampaignContacts, setSelectedCampaignContacts] = useState([]);
+  const [campaignSettings, setCampaignSettings] = useState({ templateId: "", dailyLimit: 12, spreadHours: 6, followUpDays: 5 });
+  const [sendingQueue, setSendingQueue] = useState([]);
+  const [isSending, setIsSending] = useState(false);
+
+  // Microsoft OAuth Login
+  const msLogin = async () => {
+    if (!msalInstance) { alert("MSAL yüklenemedi"); return; }
+    try {
+      const response = await msalInstance.loginPopup({ scopes: MS_SCOPES });
+      setMsAccount(response.account);
+      showSync("Microsoft hesabı bağlandı ✓");
+    } catch (e) {
+      console.error("MS Login error:", e);
+      alert("Giriş başarısız: " + e.message);
+    }
+  };
+
+  const msLogout = async () => {
+    if (!msalInstance) return;
+    try {
+      await msalInstance.logoutPopup();
+      setMsAccount(null);
+      showSync("Microsoft hesabı çıkış yapıldı");
+    } catch (e) {
+      console.error("MS Logout error:", e);
+    }
+  };
+
+  const getMsToken = async () => {
+    if (!msalInstance || !msAccount) return null;
+    try {
+      const response = await msalInstance.acquireTokenSilent({ scopes: MS_SCOPES, account: msAccount });
+      return response.accessToken;
+    } catch (e) {
+      // If silent fails, try popup
+      try {
+        const response = await msalInstance.acquireTokenPopup({ scopes: MS_SCOPES });
+        return response.accessToken;
+      } catch (e2) {
+        console.error("Token error:", e2);
+        return null;
+      }
+    }
+  };
+
+  // Check for existing account on load
+  useEffect(() => {
+    if (msalInstance) {
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) {
+        setMsAccount(accounts[0]);
+      }
+    }
+  }, []);
+
+  // Send email via Microsoft Graph
+  const sendEmail = async (to, subject, body, attachments = []) => {
+    const token = await getMsToken();
+    if (!token) { alert("Token alınamadı, tekrar giriş yapın"); return false; }
+
+    const message = {
+      message: {
+        subject,
+        body: { contentType: "HTML", content: body },
+        toRecipients: [{ emailAddress: { address: to } }],
+        attachments: attachments.map(a => ({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: a.name,
+          contentType: a.type,
+          contentBytes: a.base64
+        }))
+      },
+      saveToSentItems: true
+    };
+
+    try {
+      const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(message)
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || "Mail gönderilemedi");
+      }
+      return true;
+    } catch (e) {
+      console.error("Send error:", e);
+      return false;
+    }
+  };
+
+  // Check for replies
+  const checkReplies = async () => {
+    const token = await getMsToken();
+    if (!token) return;
+
+    try {
+      // Get recent emails from inbox
+      const res = await fetch("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const emails = data.value || [];
+
+      // Check if any email is a reply to our sent emails
+      const pendingSends = (window._revlData?.coldMailSends || []).filter(s => s.status === "sent" && !s.replyAt);
+      let updated = false;
+
+      pendingSends.forEach(send => {
+        const contact = (window._revlData?.contacts || []).find(c => c.id === send.contactId);
+        if (!contact?.email) return;
+
+        const reply = emails.find(e =>
+          e.from?.emailAddress?.address?.toLowerCase() === contact.email.toLowerCase()
+        );
+
+        if (reply) {
+          send.replyAt = reply.receivedDateTime;
+          send.status = "replied";
+          updated = true;
+        }
+      });
+
+      if (updated) {
+        showSync("Cevaplar kontrol edildi ✓");
+      }
+    } catch (e) {
+      console.error("Check replies error:", e);
+    }
+  };
+
+  // Replace template placeholders
+  const replaceTemplatePlaceholders = (text, contact, company) => {
+    return text
+      .replace(/\{firma_adı\}/gi, company?.name || "")
+      .replace(/\{kontakt_adı\}/gi, contact?.name || "")
+      .replace(/\{kontakt_isim\}/gi, contact?.name?.split(" ")[0] || "")
+      .replace(/\{kontakt_soyisim\}/gi, contact?.name?.split(" ").slice(1).join(" ") || "")
+      .replace(/\{kontakt_ünvan\}/gi, contact?.title || "")
+      .replace(/\{email\}/gi, contact?.email || "");
+  };
+
+  // Add template
+  const addTemplate = () => {
+    if (!newTemplate.name.trim() || !newTemplate.subject.trim()) {
+      alert("Şablon adı ve konu gerekli");
+      return;
+    }
+    updateData(prev => ({
+      ...prev,
+      coldMailTemplates: [...(prev.coldMailTemplates || []), { ...newTemplate, id: uid(), createdAt: new Date().toISOString(), sentCount: 0, replyCount: 0 }]
+    }));
+    setNewTemplate({ name: "", subject: "", body: "" });
+    showSync("Şablon eklendi ✓");
+  };
+
+  // Delete template
+  const deleteTemplate = (id) => {
+    if (!confirm("Bu şablonu silmek istediğinize emin misiniz?")) return;
+    updateData(prev => ({
+      ...prev,
+      coldMailTemplates: (prev.coldMailTemplates || []).filter(t => t.id !== id)
+    }));
+    showSync("Şablon silindi ✓");
+  };
+
+  // Update template
+  const updateTemplate = (id, updates) => {
+    updateData(prev => ({
+      ...prev,
+      coldMailTemplates: (prev.coldMailTemplates || []).map(t => t.id === id ? { ...t, ...updates } : t)
+    }));
+    showSync("Şablon güncellendi ✓");
+  };
+
+  // Start campaign - add contacts to queue
+  const startCampaign = () => {
+    if (selectedCampaignContacts.length === 0) {
+      alert("En az bir kontakt seçin");
+      return;
+    }
+    if (!campaignSettings.templateId) {
+      alert("Şablon seçin");
+      return;
+    }
+
+    const template = data.coldMailTemplates.find(t => t.id === campaignSettings.templateId);
+    if (!template) {
+      alert("Geçersiz şablon");
+      return;
+    }
+
+    const newSends = selectedCampaignContacts.map((contactId, index) => {
+      const contact = data.contacts.find(c => c.id === contactId);
+      const company = data.companies.find(c => c.id === contact?.companyId);
+
+      // Calculate scheduled time - spread over hours
+      const spreadMs = (campaignSettings.spreadHours * 60 * 60 * 1000) / Math.min(selectedCampaignContacts.length, campaignSettings.dailyLimit);
+      const scheduledAt = new Date(Date.now() + (index * spreadMs)).toISOString();
+
+      return {
+        id: uid(),
+        contactId,
+        companyId: contact?.companyId,
+        templateId: template.id,
+        email: contact?.email,
+        subject: replaceTemplatePlaceholders(template.subject, contact, company),
+        body: replaceTemplatePlaceholders(template.body, contact, company),
+        status: "queued",
+        scheduledAt,
+        createdAt: new Date().toISOString(),
+        followUpDays: campaignSettings.followUpDays
+      };
+    });
+
+    updateData(prev => ({
+      ...prev,
+      coldMailSends: [...(prev.coldMailSends || []), ...newSends]
+    }));
+
+    setSelectedCampaignContacts([]);
+    setColdMailTab("queue");
+    showSync(`${newSends.length} mail kuyruğa eklendi ✓`);
+  };
+
+  // Process queue - send emails that are due
+  const processQueue = async () => {
+    if (isSending) return;
+    setIsSending(true);
+
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    const todaySentCount = (data.coldMailSends || []).filter(s => s.sentAt?.startsWith(today)).length;
+
+    if (todaySentCount >= campaignSettings.dailyLimit) {
+      alert(`Günlük limit (${campaignSettings.dailyLimit}) doldu`);
+      setIsSending(false);
+      return;
+    }
+
+    const queued = (data.coldMailSends || []).filter(s =>
+      s.status === "queued" && new Date(s.scheduledAt) <= now
+    ).slice(0, campaignSettings.dailyLimit - todaySentCount);
+
+    for (const send of queued) {
+      const success = await sendEmail(send.email, send.subject, send.body);
+
+      updateData(prev => ({
+        ...prev,
+        coldMailSends: prev.coldMailSends.map(s =>
+          s.id === send.id
+            ? { ...s, status: success ? "sent" : "failed", sentAt: success ? new Date().toISOString() : null }
+            : s
+        ),
+        coldMailTemplates: prev.coldMailTemplates.map(t =>
+          t.id === send.templateId && success ? { ...t, sentCount: (t.sentCount || 0) + 1 } : t
+        )
+      }));
+
+      // Wait a bit between emails
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    setIsSending(false);
+    showSync(`${queued.length} mail gönderildi ✓`);
+  };
+
+  // Cancel queued email
+  const cancelQueuedEmail = (id) => {
+    updateData(prev => ({
+      ...prev,
+      coldMailSends: prev.coldMailSends.filter(s => s.id !== id)
+    }));
+    showSync("Mail iptal edildi ✓");
+  };
+
+  const renderColdMail = () => {
+    const templates = data.coldMailTemplates || [];
+    const sends = data.coldMailSends || [];
+    const queuedEmails = sends.filter(s => s.status === "queued");
+    const sentEmails = sends.filter(s => s.status === "sent");
+    const repliedEmails = sends.filter(s => s.status === "replied");
+    const failedEmails = sends.filter(s => s.status === "failed");
+
+    // Get contacts with email
+    const contactsWithEmail = data.contacts.filter(c => c.email);
+
+    return (
+      <div>
+        {/* Header with MS Login */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>📧 Cold Mail</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {msAccount ? (
+              <>
+                <span style={{ fontSize: 11, color: colors.green, background: colors.greenDim, padding: "4px 10px", borderRadius: 4 }}>
+                  ✓ {msAccount.username}
+                </span>
+                <button style={s.btn()} onClick={checkReplies}>🔄 Cevapları Kontrol Et</button>
+                <button style={s.btn("danger")} onClick={msLogout}>Çıkış</button>
+              </>
+            ) : (
+              <button style={s.btn("primary")} onClick={msLogin}>
+                🔐 Microsoft ile Giriş Yap
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Stats Row */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          <div style={s.statCard(colors.accent)}><div style={{ fontSize: 22, fontWeight: 800, color: colors.accent }}>{templates.length}</div><div style={{ fontSize: 11, color: colors.textMuted }}>Şablon</div></div>
+          <div style={s.statCard(colors.yellow)}><div style={{ fontSize: 22, fontWeight: 800, color: colors.yellow }}>{queuedEmails.length}</div><div style={{ fontSize: 11, color: colors.textMuted }}>Kuyrukta</div></div>
+          <div style={s.statCard(colors.green)}><div style={{ fontSize: 22, fontWeight: 800, color: colors.green }}>{sentEmails.length}</div><div style={{ fontSize: 11, color: colors.textMuted }}>Gönderildi</div></div>
+          <div style={s.statCard(colors.purple)}><div style={{ fontSize: 22, fontWeight: 800, color: colors.purple }}>{repliedEmails.length}</div><div style={{ fontSize: 11, color: colors.textMuted }}>Cevap Geldi</div></div>
+          <div style={s.statCard(colors.red)}><div style={{ fontSize: 22, fontWeight: 800, color: colors.red }}>{failedEmails.length}</div><div style={{ fontSize: 11, color: colors.textMuted }}>Başarısız</div></div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+          {[
+            { id: "templates", label: "📝 Şablonlar" },
+            { id: "campaigns", label: "🚀 Kampanya Oluştur" },
+            { id: "queue", label: `📤 Kuyruk (${queuedEmails.length})` },
+            { id: "logs", label: "📊 Loglar" },
+          ].map(t => (
+            <button key={t.id} style={{ ...s.btn(coldMailTab === t.id ? "primary" : "default"), fontSize: 12 }} onClick={() => setColdMailTab(t.id)}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Templates Tab */}
+        {coldMailTab === "templates" && (
+          <div>
+            {/* Add Template Form */}
+            <div style={{ ...s.card, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Yeni Şablon Ekle</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
+                <input style={s.input} placeholder="Şablon Adı" value={newTemplate.name} onChange={e => setNewTemplate({ ...newTemplate, name: e.target.value })} />
+                <input style={s.input} placeholder="Konu (örn: {firma_adı} için özel teklif)" value={newTemplate.subject} onChange={e => setNewTemplate({ ...newTemplate, subject: e.target.value })} />
+              </div>
+              <textarea style={{ ...s.input, minHeight: 120, fontFamily: "inherit" }} placeholder="Mail içeriği... Kullanılabilir değişkenler: {firma_adı}, {kontakt_adı}, {kontakt_isim}, {kontakt_ünvan}" value={newTemplate.body} onChange={e => setNewTemplate({ ...newTemplate, body: e.target.value })} />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <button style={s.btn("primary")} onClick={addTemplate}><PlusIcon size={14}/> Şablon Ekle</button>
+              </div>
+            </div>
+
+            {/* Template List */}
+            <div style={{ display: "grid", gap: 12 }}>
+              {templates.map(t => (
+                <div key={t.id} style={s.card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</div>
+                      <div style={{ fontSize: 12, color: colors.textMuted }}>Konu: {t.subject}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <Badge color={colors.green} bg={colors.greenDim}>{t.sentCount || 0} gönderildi</Badge>
+                      <Badge color={colors.purple} bg="#2d1a4e"}>{t.replyCount || 0} cevap</Badge>
+                      {t.sentCount > 0 && <Badge color={colors.yellow} bg={colors.yellowDim}>{Math.round((t.replyCount || 0) / t.sentCount * 100)}% başarı</Badge>}
+                      <button style={{ ...s.btn("danger"), padding: "4px 8px" }} onClick={() => deleteTemplate(t.id)}><TrashIcon size={12}/></button>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: colors.textDim, whiteSpace: "pre-wrap", maxHeight: 80, overflow: "hidden" }}>{t.body}</div>
+                </div>
+              ))}
+              {templates.length === 0 && (
+                <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
+                  Henüz şablon yok. Yukarıdan ilk şablonunuzu ekleyin.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Campaigns Tab */}
+        {coldMailTab === "campaigns" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* Left: Contact Selection */}
+            <div style={s.card}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Kontakt Seç ({selectedCampaignContacts.length} seçili)</div>
+              <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                {data.companies.map(company => {
+                  const companyContacts = contactsWithEmail.filter(c => c.companyId === company.id);
+                  if (companyContacts.length === 0) return null;
+                  return (
+                    <div key={company.id} style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: colors.accent, marginBottom: 4 }}>{company.name}</div>
+                      {companyContacts.map(contact => {
+                        const isSelected = selectedCampaignContacts.includes(contact.id);
+                        const alreadySent = sends.some(s => s.contactId === contact.id && s.status !== "failed");
+                        return (
+                          <div key={contact.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: isSelected ? colors.accentDim : "transparent", borderRadius: 4, marginBottom: 2 }}>
+                            <input type="checkbox" checked={isSelected} disabled={alreadySent} onChange={() => {
+                              if (isSelected) {
+                                setSelectedCampaignContacts(prev => prev.filter(id => id !== contact.id));
+                              } else {
+                                setSelectedCampaignContacts(prev => [...prev, contact.id]);
+                              }
+                            }} />
+                            <span style={{ fontSize: 11, flex: 1, color: alreadySent ? colors.textDim : colors.text }}>
+                              {contact.name} - {contact.email}
+                              {alreadySent && <span style={{ color: colors.green, marginLeft: 6 }}>✓ Zaten gönderildi</span>}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right: Campaign Settings */}
+            <div style={s.card}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Kampanya Ayarları</div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Şablon Seç</label>
+                <select style={s.select} value={campaignSettings.templateId} onChange={e => setCampaignSettings({ ...campaignSettings, templateId: e.target.value })}>
+                  <option value="">— Şablon Seç —</option>
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Günlük Mail Limiti</label>
+                <input type="number" style={s.input} value={campaignSettings.dailyLimit} onChange={e => setCampaignSettings({ ...campaignSettings, dailyLimit: parseInt(e.target.value) || 12 })} min={1} max={50} />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Kaç saate yay?</label>
+                <input type="number" style={s.input} value={campaignSettings.spreadHours} onChange={e => setCampaignSettings({ ...campaignSettings, spreadHours: parseInt(e.target.value) || 6 })} min={1} max={12} />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 4 }}>Cevap gelmezse kaç gün sonra follow-up?</label>
+                <input type="number" style={s.input} value={campaignSettings.followUpDays} onChange={e => setCampaignSettings({ ...campaignSettings, followUpDays: parseInt(e.target.value) || 5 })} min={1} max={30} />
+              </div>
+
+              <button style={{ ...s.btn("primary"), width: "100%" }} onClick={startCampaign} disabled={!msAccount}>
+                🚀 Kampanyayı Başlat ({selectedCampaignContacts.length} kişi)
+              </button>
+
+              {!msAccount && <div style={{ fontSize: 10, color: colors.red, marginTop: 8, textAlign: "center" }}>Önce Microsoft ile giriş yapın</div>}
+            </div>
+          </div>
+        )}
+
+        {/* Queue Tab */}
+        {coldMailTab === "queue" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Mail Kuyruğu</div>
+              <button style={s.btn("success")} onClick={processQueue} disabled={isSending || queuedEmails.length === 0}>
+                {isSending ? "⏳ Gönderiliyor..." : `▶️ Şimdi Gönder (${queuedEmails.length})`}
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {queuedEmails.map(send => {
+                const contact = data.contacts.find(c => c.id === send.contactId);
+                const company = data.companies.find(c => c.id === send.companyId);
+                const scheduledDate = new Date(send.scheduledAt);
+                return (
+                  <div key={send.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{contact?.name} — {company?.name}</div>
+                      <div style={{ fontSize: 11, color: colors.textMuted }}>{send.email}</div>
+                      <div style={{ fontSize: 10, color: colors.textDim }}>Konu: {send.subject}</div>
+                    </div>
+                    <div style={{ fontSize: 10, color: colors.accent }}>
+                      ⏰ {scheduledDate.toLocaleTimeString("tr", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                    <button style={{ ...s.btn("danger"), padding: "4px 8px" }} onClick={() => cancelQueuedEmail(send.id)}>
+                      <XIcon size={12}/>
+                    </button>
+                  </div>
+                );
+              })}
+              {queuedEmails.length === 0 && (
+                <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
+                  Kuyrukta mail yok.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Logs Tab */}
+        {coldMailTab === "logs" && (
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Gönderim Logları</div>
+            <table style={{ ...s.table, width: "100%" }}>
+              <thead>
+                <tr>
+                  <th style={s.th}>Tarih</th>
+                  <th style={s.th}>Kontakt</th>
+                  <th style={s.th}>Firma</th>
+                  <th style={s.th}>Email</th>
+                  <th style={s.th}>Durum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sends.filter(s => s.status !== "queued").sort((a, b) => new Date(b.sentAt || b.createdAt) - new Date(a.sentAt || a.createdAt)).slice(0, 50).map(send => {
+                  const contact = data.contacts.find(c => c.id === send.contactId);
+                  const company = data.companies.find(c => c.id === send.companyId);
+                  const statusColors = { sent: colors.yellow, replied: colors.green, failed: colors.red };
+                  const statusLabels = { sent: "📤 Gönderildi", replied: "✅ Cevap Geldi", failed: "❌ Başarısız" };
+                  return (
+                    <tr key={send.id}>
+                      <td style={s.td}>{new Date(send.sentAt || send.createdAt).toLocaleString("tr")}</td>
+                      <td style={s.td}>{contact?.name || "—"}</td>
+                      <td style={s.td}>{company?.name || "—"}</td>
+                      <td style={s.td}>{send.email}</td>
+                      <td style={s.td}>
+                        <Badge color={statusColors[send.status]} bg={statusColors[send.status] + "20"}>{statusLabels[send.status]}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {sends.filter(s => s.status !== "queued").length === 0 && (
+              <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30, marginTop: 12 }}>
+                Henüz gönderim yok.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================
   // ACTIONS PAGE
   // ============================================================
 
@@ -3502,6 +4074,7 @@ function SalesPipelineApp({ onLogout }) {
             { id: "weekly", label: `📅 Hafta ${selectedWeek}` },
             { id: "dashboard", label: "📊 Dashboard" },
             { id: "companies", label: "🏢 Firmalar" },
+            { id: "coldmail", label: "📧 Cold Mail" },
             { id: "competitors", label: "⚔️ Rakipler" },
             { id: "todos", label: "✅ To-Do" },
             { id: "actions", label: "📋 Aksiyonlar" },
@@ -3547,6 +4120,7 @@ function SalesPipelineApp({ onLogout }) {
             {activeTab === "weekly" && renderWeeklyView()}
             {activeTab === "dashboard" && renderDashboard()}
             {activeTab === "companies" && renderAllCompanies()}
+            {activeTab === "coldmail" && renderColdMail()}
             {activeTab === "competitors" && renderCompetitors()}
             {activeTab === "todos" && renderTodos()}
             {activeTab === "actions" && renderActions()}
