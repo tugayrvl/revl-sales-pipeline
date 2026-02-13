@@ -2114,6 +2114,124 @@ function SalesPipelineApp({ onLogout }) {
     showSync("Rakip firma silindi ✓");
   };
 
+  // ============================================================
+  // CONTACTS PAGE
+  // ============================================================
+
+  const renderContacts = () => {
+    const allContacts = data.contacts || [];
+
+    // Filter contacts based on search (primarily phone number)
+    const filteredContacts = allContacts.filter(contact => {
+      if (!contactsPageSearch.trim()) return true;
+      const search = contactsPageSearch.toLowerCase().replace(/\s/g, "");
+      const phone = (contact.phone || "").replace(/\s/g, "").toLowerCase();
+      const name = (contact.name || "").toLowerCase();
+      const email = (contact.email || "").toLowerCase();
+      const company = data.companies.find(c => c.id === contact.companyId);
+      const companyName = (company?.name || "").toLowerCase();
+
+      return phone.includes(search) || name.includes(search) || email.includes(search) || companyName.includes(search);
+    });
+
+    // Sort by company name
+    const sortedContacts = [...filteredContacts].sort((a, b) => {
+      const companyA = data.companies.find(c => c.id === a.companyId)?.name || "";
+      const companyB = data.companies.find(c => c.id === b.companyId)?.name || "";
+      return companyA.localeCompare(companyB);
+    });
+
+    return (
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Tüm Kontaktlar ({allContacts.length})</div>
+
+        {/* Phone Search Bar */}
+        <div style={{ ...s.card, marginBottom: 16 }}>
+          <input
+            type="text"
+            style={{ ...s.input, fontSize: 16, padding: "12px 16px" }}
+            placeholder="📞 Telefon numarası veya isim ile ara..."
+            value={contactsPageSearch}
+            onChange={e => setContactsPageSearch(e.target.value)}
+            autoFocus
+          />
+          {contactsPageSearch && (
+            <div style={{ marginTop: 8, fontSize: 12, color: colors.textMuted }}>
+              {filteredContacts.length} sonuç bulundu
+            </div>
+          )}
+        </div>
+
+        {/* Contact List */}
+        <div style={{ display: "grid", gap: 8 }}>
+          {sortedContacts.map(contact => {
+            const company = data.companies.find(c => c.id === contact.companyId);
+            const profile = contact.profile || {};
+
+            return (
+              <div
+                key={contact.id}
+                style={{
+                  ...s.card,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  cursor: "pointer",
+                  transition: "background 0.15s ease"
+                }}
+                onClick={() => {
+                  if (company) {
+                    setExpandedFirm(company.id);
+                    setActiveTab("weekly");
+                  }
+                }}
+                onMouseOver={e => e.currentTarget.style.background = colors.surfaceHover}
+                onMouseOut={e => e.currentTarget.style.background = colors.surface}
+              >
+                {/* Contact Info */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{contact.name || "İsimsiz"}</span>
+                    {contact.title && <span style={{ fontSize: 11, color: colors.textMuted }}>• {contact.title}</span>}
+                    {profile.decisionAuth && <Badge color={colors.purple} bg="#2d1a4e">👤 {profile.decisionAuth}</Badge>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
+                    {contact.phone && (
+                      <span style={{ color: colors.green, fontWeight: 600 }}>📞 {contact.phone}</span>
+                    )}
+                    {contact.email && (
+                      <span style={{ color: colors.yellow }}>✉️ {contact.email}</span>
+                    )}
+                  </div>
+                  {(profile.painPoints || profile.needs) && (
+                    <div style={{ fontSize: 10, color: colors.textDim, marginTop: 4 }}>
+                      {profile.painPoints && <span>🎯 {profile.painPoints}</span>}
+                      {profile.needs && <span style={{ marginLeft: 8 }}>💡 {profile.needs}</span>}
+                    </div>
+                  )}
+                </div>
+
+                {/* Company Badge */}
+                {company && (
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.accent }}>{company.name}</div>
+                    <div style={{ fontSize: 10, color: colors.textDim }}>{company.industry || "Sektör belirtilmedi"}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {sortedContacts.length === 0 && (
+            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 40 }}>
+              {contactsPageSearch ? "Arama sonucu bulunamadı" : "Henüz kontakt eklenmemiş"}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderCompetitors = () => {
     const competitors = data.competitors || [];
 
@@ -2427,6 +2545,7 @@ function SalesPipelineApp({ onLogout }) {
   const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "", attachments: [] });
   const [selectedCampaignContacts, setSelectedCampaignContacts] = useState([]);
   const [contactSearchQuery, setContactSearchQuery] = useState("");
+  const [contactsPageSearch, setContactsPageSearch] = useState("");
   const [campaignSettings, setCampaignSettings] = useState({ templateId: "", dailyLimit: 12, spreadHours: 6, followUpDays: 5 });
   const [sendingQueue, setSendingQueue] = useState([]);
   const [isSending, setIsSending] = useState(false);
@@ -4264,6 +4383,7 @@ function SalesPipelineApp({ onLogout }) {
               { id: "weekly", label: `📅 Hafta ${selectedWeek}` },
               { id: "dashboard", label: "📊 Dashboard" },
               { id: "companies", label: "🏢 Firmalar" },
+              { id: "contacts", label: "👤 Kontaktlar" },
               { id: "coldmail", label: "📧 Cold Mail" },
               { id: "competitors", label: "⚔️ Rakipler" },
               { id: "todos", label: "✅ To-Do" },
@@ -4311,6 +4431,7 @@ function SalesPipelineApp({ onLogout }) {
             {activeTab === "weekly" && renderWeeklyView()}
             {activeTab === "dashboard" && renderDashboard()}
             {activeTab === "companies" && renderAllCompanies()}
+            {activeTab === "contacts" && renderContacts()}
             {activeTab === "coldmail" && renderColdMail()}
             {activeTab === "competitors" && renderCompetitors()}
             {activeTab === "todos" && renderTodos()}
