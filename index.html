@@ -2542,8 +2542,11 @@ function SalesPipelineApp({ onLogout }) {
   const [msAccount, setMsAccount] = useState(null);
   const [coldMailTab, setColdMailTab] = useState("templates"); // templates, campaigns, queue, logs
   const [editingTemplate, setEditingTemplate] = useState(null);
-  const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "", attachments: [] });
+  const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "", attachmentIds: [] });
   const [selectedCampaignContacts, setSelectedCampaignContacts] = useState([]);
+
+  // File Library - stored in data.coldMailFiles
+  const fileLibrary = data.coldMailFiles || [];
   const [contactSearchQuery, setContactSearchQuery] = useState("");
   const [contactsPageSearch, setContactsPageSearch] = useState("");
   const [campaignSettings, setCampaignSettings] = useState({ templateId: "", dailyLimit: 12, spreadHours: 6, followUpDays: 5 });
@@ -2743,7 +2746,7 @@ function SalesPipelineApp({ onLogout }) {
       ...prev,
       coldMailTemplates: [...(prev.coldMailTemplates || []), { ...newTemplate, id: uid(), createdAt: new Date().toISOString(), sentCount: 0, replyCount: 0 }]
     }));
-    setNewTemplate({ name: "", subject: "", body: "", attachments: [] });
+    setNewTemplate({ name: "", subject: "", body: "", attachmentIds: [] });
     showSync("Şablon eklendi ✓");
   };
 
@@ -2799,7 +2802,7 @@ function SalesPipelineApp({ onLogout }) {
         email: contact?.email,
         subject: replaceTemplatePlaceholders(template.subject, contact, company),
         body: replaceTemplatePlaceholders(template.body, contact, company),
-        attachments: template.attachments || [],
+        attachments: (template.attachmentIds || []).map(id => fileLibrary.find(f => f.id === id)).filter(Boolean),
         status: "queued",
         scheduledAt,
         createdAt: new Date().toISOString(),
@@ -2914,6 +2917,7 @@ function SalesPipelineApp({ onLogout }) {
         <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
           {[
             { id: "templates", label: "📝 Şablonlar" },
+            { id: "files", label: `📁 Dosyalar (${fileLibrary.length})` },
             { id: "campaigns", label: "🚀 Kampanya Oluştur" },
             { id: "queue", label: `📤 Kuyruk (${queuedEmails.length})` },
             { id: "logs", label: "📊 Loglar" },
@@ -2934,44 +2938,43 @@ function SalesPipelineApp({ onLogout }) {
               </div>
               <textarea style={{ ...s.input, minHeight: 120, fontFamily: "inherit" }} placeholder="Mail içeriği... Kullanılabilir değişkenler: {firma_adı}, {kontakt_adı}, {kontakt_isim}, {kontakt_ünvan}" value={newTemplate.body} onChange={e => setNewTemplate({ ...newTemplate, body: e.target.value })} />
 
-              {/* Attachments */}
+              {/* Attachments from File Library */}
               <div style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <label style={{ fontSize: 11, color: colors.textMuted }}>Ekler:</label>
-                  <input
-                    type="file"
-                    multiple
-                    style={{ display: "none" }}
-                    id="template-attachment-input"
-                    onChange={async (e) => {
-                      const files = Array.from(e.target.files || []);
-                      const attachments = await Promise.all(files.map(async (file) => {
-                        const base64 = await new Promise((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = () => resolve(reader.result.split(",")[1]);
-                          reader.readAsDataURL(file);
-                        });
-                        return { name: file.name, type: file.type, size: file.size, base64 };
-                      }));
-                      setNewTemplate(prev => ({ ...prev, attachments: [...(prev.attachments || []), ...attachments] }));
-                      e.target.value = "";
-                    }}
-                  />
-                  <button style={s.btn()} onClick={() => document.getElementById("template-attachment-input").click()}>
-                    📎 Dosya Ekle
-                  </button>
-                </div>
-                {(newTemplate.attachments || []).length > 0 && (
+                <label style={{ fontSize: 11, color: colors.textMuted, display: "block", marginBottom: 8 }}>
+                  Ekler (Dosya Kütüphanesinden Seç):
+                </label>
+                {fileLibrary.length > 0 ? (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {newTemplate.attachments.map((att, idx) => (
-                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: colors.surfaceHover, borderRadius: 4, fontSize: 11 }}>
-                        <span>📄 {att.name}</span>
-                        <span style={{ color: colors.textDim }}>({(att.size / 1024).toFixed(1)} KB)</span>
-                        <button style={{ background: "none", border: "none", color: colors.red, cursor: "pointer", padding: 0 }} onClick={() => {
-                          setNewTemplate(prev => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }));
-                        }}>✕</button>
-                      </div>
-                    ))}
+                    {fileLibrary.map(file => {
+                      const isSelected = (newTemplate.attachmentIds || []).includes(file.id);
+                      return (
+                        <div
+                          key={file.id}
+                          onClick={() => {
+                            setNewTemplate(prev => ({
+                              ...prev,
+                              attachmentIds: isSelected
+                                ? prev.attachmentIds.filter(id => id !== file.id)
+                                : [...(prev.attachmentIds || []), file.id]
+                            }));
+                          }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6,
+                            padding: "6px 10px", borderRadius: 6, cursor: "pointer",
+                            background: isSelected ? colors.accentDim : colors.surfaceHover,
+                            border: isSelected ? `2px solid ${colors.accent}` : "2px solid transparent",
+                            fontSize: 11
+                          }}
+                        >
+                          <span>{isSelected ? "✅" : "📄"} {file.name}</span>
+                          <span style={{ color: colors.textDim }}>({(file.size / 1024).toFixed(0)} KB)</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: colors.textDim }}>
+                    Henüz dosya yok. <span style={{ color: colors.accent, cursor: "pointer" }} onClick={() => setColdMailTab("files")}>Dosyalar</span> sekmesinden yükleyin.
                   </div>
                 )}
               </div>
@@ -2993,7 +2996,7 @@ function SalesPipelineApp({ onLogout }) {
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <Badge color={colors.green} bg={colors.greenDim}>{t.sentCount || 0} gönderildi</Badge>
                       <Badge color={colors.purple} bg="#2d1a4e">{t.replyCount || 0} cevap</Badge>
-                      {(t.attachments?.length > 0) && <Badge color={colors.textMuted} bg={colors.surfaceHover}>📎 {t.attachments.length} ek</Badge>}
+                      {(t.attachmentIds?.length > 0) && <Badge color={colors.textMuted} bg={colors.surfaceHover}>📎 {t.attachmentIds.length} ek</Badge>}
                       {t.sentCount > 0 && <Badge color={colors.yellow} bg={colors.yellowDim}>{Math.round((t.replyCount || 0) / t.sentCount * 100)}% başarı</Badge>}
                       <button style={{ ...s.btn("danger"), padding: "4px 8px" }} onClick={() => deleteTemplate(t.id)}><TrashIcon size={12}/></button>
                     </div>
@@ -3004,6 +3007,86 @@ function SalesPipelineApp({ onLogout }) {
               {templates.length === 0 && (
                 <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 30 }}>
                   Henüz şablon yok. Yukarıdan ilk şablonunuzu ekleyin.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Files Tab - File Library */}
+        {coldMailTab === "files" && (
+          <div>
+            <div style={{ ...s.card, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Dosya Yükle</div>
+              <input
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                id="file-library-input"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  const newFiles = await Promise.all(files.map(async (file) => {
+                    const base64 = await new Promise((resolve) => {
+                      const reader = new FileReader();
+                      reader.onload = () => resolve(reader.result.split(",")[1]);
+                      reader.readAsDataURL(file);
+                    });
+                    return { id: uid(), name: file.name, type: file.type, size: file.size, base64, createdAt: new Date().toISOString() };
+                  }));
+                  updateData(prev => ({
+                    ...prev,
+                    coldMailFiles: [...(prev.coldMailFiles || []), ...newFiles]
+                  }));
+                  showSync(`${newFiles.length} dosya yüklendi ✓`);
+                  e.target.value = "";
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button style={s.btn("primary")} onClick={() => document.getElementById("file-library-input").click()}>
+                  📁 Dosya Seç ve Yükle
+                </button>
+                <span style={{ fontSize: 11, color: colors.textDim }}>PDF, PPTX, DOCX, resim dosyaları yükleyebilirsiniz</span>
+              </div>
+            </div>
+
+            {/* File List */}
+            <div style={{ display: "grid", gap: 8 }}>
+              {fileLibrary.length > 0 ? (
+                fileLibrary.map(file => (
+                  <div key={file.id} style={{ ...s.card, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 24 }}>
+                        {file.type?.includes("pdf") ? "📕" :
+                         file.type?.includes("presentation") || file.type?.includes("pptx") ? "📊" :
+                         file.type?.includes("word") || file.type?.includes("document") ? "📘" :
+                         file.type?.includes("image") ? "🖼️" :
+                         file.type?.includes("excel") || file.type?.includes("sheet") ? "📗" : "📄"}
+                      </span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{file.name}</div>
+                        <div style={{ fontSize: 11, color: colors.textDim }}>
+                          {(file.size / 1024).toFixed(1)} KB • {new Date(file.createdAt).toLocaleDateString("tr-TR")}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      style={{ ...s.btn("danger"), padding: "6px 12px" }}
+                      onClick={() => {
+                        if (!confirm(`"${file.name}" dosyasını silmek istediğinize emin misiniz?`)) return;
+                        updateData(prev => ({
+                          ...prev,
+                          coldMailFiles: prev.coldMailFiles.filter(f => f.id !== file.id)
+                        }));
+                        showSync("Dosya silindi ✓");
+                      }}
+                    >
+                      <TrashIcon size={12} />
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 40 }}>
+                  Henüz dosya yüklenmedi. Sunum, PDF veya döküman yükleyin.
                 </div>
               )}
             </div>
