@@ -2199,16 +2199,16 @@ function SalesPipelineApp({ onLogout }) {
 
         {/* Contact Table */}
         <div style={{ ...s.card, padding: 0, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, tableLayout: "fixed" }}>
             <thead>
               <tr>
-                <th style={{ ...headerStyle, width: 140 }}>İsim Soyisim</th>
-                <th style={{ ...headerStyle, width: 168 }}>Ünvan</th>
-                <th style={{ ...headerStyle, width: 110 }}>Telefon 1</th>
-                <th style={{ ...headerStyle, width: 110 }}>Telefon 2</th>
-                <th style={{ ...headerStyle, width: 160 }}>Email</th>
-                <th style={{ ...headerStyle, width: 120 }}>Şirket</th>
-                <th style={{ ...headerStyle, width: 80 }}>Sektör</th>
+                <th style={{ ...headerStyle, width: 140, maxWidth: 140 }}>İsim Soyisim</th>
+                <th style={{ ...headerStyle, width: 168, maxWidth: 200 }}>Ünvan</th>
+                <th style={{ ...headerStyle, width: 110, maxWidth: 120 }}>Telefon 1</th>
+                <th style={{ ...headerStyle, width: 110, maxWidth: 120 }}>Telefon 2</th>
+                <th style={{ ...headerStyle, width: 180 }}>Email</th>
+                <th style={{ ...headerStyle, width: 140 }}>Şirket</th>
+                <th style={{ ...headerStyle, width: 100 }}>Sektör</th>
                 <th style={{ ...headerStyle, width: 140, textAlign: "center" }}>İşlemler</th>
               </tr>
             </thead>
