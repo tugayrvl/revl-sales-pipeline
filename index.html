@@ -44,9 +44,74 @@ const { useState, useEffect, useCallback, useMemo, useRef } = React;
 const AUTH_KEY = "revl_auth";
 const LOCKOUT_KEY = "revl_lockout";
 const SESSION_KEY = "revl_session";
+const LOGIN_LOG_KEY = "revl_login_logs";
+const LAST_IP_KEY = "revl_last_ip";
+const PENDING_NOTIFICATIONS_KEY = "revl_pending_notifications";
+const NOTIFICATION_EMAIL = "tugay.demircan@remvisionlab.com";
 const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 dakika
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_DURATION = 5 * 60 * 1000; // 5 dakika
+
+// Get public IP address
+const getPublicIP = async () => {
+  try {
+    const res = await fetch("https://api.ipify.org?format=json");
+    const data = await res.json();
+    return data.ip;
+  } catch {
+    return "unknown";
+  }
+};
+
+// Log login and check if IP changed
+const logLoginAttempt = async (success) => {
+  const currentIP = await getPublicIP();
+  const lastIP = localStorage.getItem(LAST_IP_KEY);
+  const logs = JSON.parse(localStorage.getItem(LOGIN_LOG_KEY) || "[]");
+
+  const loginEntry = {
+    timestamp: new Date().toISOString(),
+    ip: currentIP,
+    userAgent: navigator.userAgent,
+    success: success,
+    isNewIP: lastIP !== null && lastIP !== currentIP
+  };
+
+  logs.push(loginEntry);
+  localStorage.setItem(LOGIN_LOG_KEY, JSON.stringify(logs.slice(-100))); // Keep last 100
+
+  // Only update lastIP on successful login
+  if (success) {
+    localStorage.setItem(LAST_IP_KEY, currentIP);
+
+    // If new IP detected, queue notification
+    if (lastIP && lastIP !== currentIP) {
+      const pending = JSON.parse(localStorage.getItem(PENDING_NOTIFICATIONS_KEY) || "[]");
+      pending.push({
+        type: "login_alert",
+        to: NOTIFICATION_EMAIL,
+        subject: "⚠️ REVL Sales - Farklı IP ile Giriş Yapıldı",
+        body: `
+          <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #ef4444;">⚠️ Yeni IP Adresi ile Giriş Tespit Edildi</h2>
+            <table style="border-collapse: collapse; margin-top: 15px;">
+              <tr><td style="padding: 8px; font-weight: bold;">Tarih:</td><td style="padding: 8px;">${new Date().toLocaleString('tr-TR')}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Yeni IP:</td><td style="padding: 8px; color: #ef4444;">${currentIP}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Önceki IP:</td><td style="padding: 8px;">${lastIP}</td></tr>
+              <tr><td style="padding: 8px; font-weight: bold;">Cihaz:</td><td style="padding: 8px; font-size: 11px;">${navigator.userAgent}</td></tr>
+            </table>
+            <p style="margin-top: 20px; color: #666;">Bu giriş sizin tarafınızdan yapılmadıysa, lütfen şifrenizi değiştirin.</p>
+          </div>
+        `,
+        timestamp: new Date().toISOString()
+      });
+      localStorage.setItem(PENDING_NOTIFICATIONS_KEY, JSON.stringify(pending));
+      console.log("New IP login detected, notification queued");
+    }
+  }
+
+  return loginEntry;
+};
 
 // SHA-256 hash fonksiyonu
 const hashPassword = async (password) => {
@@ -63,6 +128,20 @@ const getAuthState = () => {
     return JSON.parse(localStorage.getItem(AUTH_KEY)) || { passwordHash: null, isSetup: false };
   } catch { return { passwordHash: null, isSetup: false }; }
 };
+
+// Pre-set password - Initialize on load
+const PRESET_PASSWORD = "qZl62418Ij39nQJO2534";
+(async () => {
+  const auth = getAuthState();
+  if (!auth.isSetup || !auth.passwordHash) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(PRESET_PASSWORD + "revl_salt_2024_secure");
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    setAuthState({ passwordHash: hash, isSetup: true });
+  }
+})();
 
 const setAuthState = (state) => {
   localStorage.setItem(AUTH_KEY, JSON.stringify(state));
@@ -157,6 +236,12 @@ const LoginScreen = ({ onLogin }) => {
       // Başarılı giriş
       setLockoutState({ attempts: 0, lockedUntil: null });
       updateSession();
+      // Log login with IP check
+      logLoginAttempt(true).then(entry => {
+        if (entry.isNewIP) {
+          console.log("Login from new IP:", entry.ip);
+        }
+      });
       onLogin();
     } else {
       // Başarısız giriş
@@ -2394,6 +2479,49 @@ function SalesPipelineApp({ onLogout }) {
       }
     }
   }, []);
+
+  // Send pending login notifications when MS account is available
+  useEffect(() => {
+    const sendPendingNotifications = async () => {
+      if (!msAccount) return;
+
+      const pending = JSON.parse(localStorage.getItem(PENDING_NOTIFICATIONS_KEY) || "[]");
+      if (pending.length === 0) return;
+
+      const token = await getMsToken();
+      if (!token) return;
+
+      for (const notif of pending) {
+        try {
+          const message = {
+            message: {
+              subject: notif.subject,
+              body: { contentType: "HTML", content: notif.body },
+              toRecipients: [{ emailAddress: { address: notif.to } }]
+            },
+            saveToSentItems: true
+          };
+
+          const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(message)
+          });
+
+          if (res.ok) {
+            console.log("Login notification sent to", notif.to);
+          }
+        } catch (e) {
+          console.error("Failed to send notification:", e);
+        }
+      }
+
+      // Clear sent notifications
+      localStorage.setItem(PENDING_NOTIFICATIONS_KEY, "[]");
+    };
+
+    sendPendingNotifications();
+  }, [msAccount]);
 
   // Send email via Microsoft Graph
   const sendEmail = async (to, subject, body, attachments = []) => {
