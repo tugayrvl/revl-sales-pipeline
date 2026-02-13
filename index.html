@@ -562,7 +562,8 @@ const colors = {
 
 const s = {
   app: { fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace", background: colors.bg, color: colors.text, height: "100vh", fontSize: 13, display: "flex", flexDirection: "column", overflow: "hidden" },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, position: "sticky", top: 0, zIndex: 100 },
+  header: { display: "flex", flexDirection: "column", gap: 8, padding: "12px 20px", background: colors.surface, borderBottom: `1px solid ${colors.border}`, position: "sticky", top: 0, zIndex: 100 },
+  headerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" },
   logo: { fontSize: 16, fontWeight: 800, letterSpacing: "0.05em", color: colors.accent },
   tabs: { display: "flex", gap: 2 },
   tab: (active) => ({ padding: "6px 14px", cursor: "pointer", borderRadius: 6, background: active ? colors.accentDim : "transparent", color: active ? colors.accent : colors.textMuted, fontWeight: active ? 700 : 500, fontSize: 12, border: "none", transition: "all 0.15s" }),
@@ -4196,22 +4197,25 @@ function SalesPipelineApp({ onLogout }) {
     <div style={s.app}>
       {/* Header */}
       <div style={s.header}>
-        <div style={s.logo}>REMVISION SALES</div>
-        <div style={s.tabs}>
-          {[
-            { id: "weekly", label: `📅 Hafta ${selectedWeek}` },
-            { id: "dashboard", label: "📊 Dashboard" },
-            { id: "companies", label: "🏢 Firmalar" },
-            { id: "coldmail", label: "📧 Cold Mail" },
-            { id: "competitors", label: "⚔️ Rakipler" },
-            { id: "todos", label: "✅ To-Do" },
-            { id: "actions", label: "📋 Aksiyonlar" },
-          ].map(t => (
-            <button key={t.id} style={s.tab(activeTab === t.id)} onClick={() => { setActiveTab(t.id); if (t.id !== "weekly") setExpandedFirm(null); }}>{t.label}</button>
-          ))}
+        {/* Row 1: Logo + Tabs */}
+        <div style={s.headerRow}>
+          <div style={s.logo}>REMVISION SALES</div>
+          <div style={s.tabs}>
+            {[
+              { id: "weekly", label: `📅 Hafta ${selectedWeek}` },
+              { id: "dashboard", label: "📊 Dashboard" },
+              { id: "companies", label: "🏢 Firmalar" },
+              { id: "coldmail", label: "📧 Cold Mail" },
+              { id: "competitors", label: "⚔️ Rakipler" },
+              { id: "todos", label: "✅ To-Do" },
+              { id: "actions", label: "📋 Aksiyonlar" },
+            ].map(t => (
+              <button key={t.id} style={s.tab(activeTab === t.id)} onClick={() => { setActiveTab(t.id); if (t.id !== "weekly") setExpandedFirm(null); }}>{t.label}</button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Cloud Status */}
+        {/* Row 2: Actions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, background: supabaseEnabled ? colors.greenDim : colors.yellowDim, color: supabaseEnabled ? colors.green : colors.yellow }} title={supabaseEnabled ? "Cloud sync aktif" : "Sadece yerel kayıt"}>
             {supabaseEnabled ? "☁️ Cloud" : "💾 Local"}
           </span>
