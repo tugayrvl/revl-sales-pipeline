@@ -4197,8 +4197,8 @@ function SalesPipelineApp({ onLogout }) {
     <div style={s.app}>
       {/* Header */}
       <div style={s.header}>
-        {/* Row 1: Logo + Tabs */}
-        <div style={s.headerRow}>
+        {/* Row 1: Logo + Tabs (left-aligned) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={s.logo}>REMVISION SALES</div>
           <div style={s.tabs}>
             {[
