@@ -2424,8 +2424,9 @@ function SalesPipelineApp({ onLogout }) {
   const [msAccount, setMsAccount] = useState(null);
   const [coldMailTab, setColdMailTab] = useState("templates"); // templates, campaigns, queue, logs
   const [editingTemplate, setEditingTemplate] = useState(null);
-  const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "" });
+  const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "", attachments: [] });
   const [selectedCampaignContacts, setSelectedCampaignContacts] = useState([]);
+  const [contactSearchQuery, setContactSearchQuery] = useState("");
   const [campaignSettings, setCampaignSettings] = useState({ templateId: "", dailyLimit: 12, spreadHours: 6, followUpDays: 5 });
   const [sendingQueue, setSendingQueue] = useState([]);
   const [isSending, setIsSending] = useState(false);
@@ -2623,7 +2624,7 @@ function SalesPipelineApp({ onLogout }) {
       ...prev,
       coldMailTemplates: [...(prev.coldMailTemplates || []), { ...newTemplate, id: uid(), createdAt: new Date().toISOString(), sentCount: 0, replyCount: 0 }]
     }));
-    setNewTemplate({ name: "", subject: "", body: "" });
+    setNewTemplate({ name: "", subject: "", body: "", attachments: [] });
     showSync("Şablon eklendi ✓");
   };
 
@@ -2679,6 +2680,7 @@ function SalesPipelineApp({ onLogout }) {
         email: contact?.email,
         subject: replaceTemplatePlaceholders(template.subject, contact, company),
         body: replaceTemplatePlaceholders(template.body, contact, company),
+        attachments: template.attachments || [],
         status: "queued",
         scheduledAt,
         createdAt: new Date().toISOString(),
@@ -2716,7 +2718,7 @@ function SalesPipelineApp({ onLogout }) {
     ).slice(0, campaignSettings.dailyLimit - todaySentCount);
 
     for (const send of queued) {
-      const success = await sendEmail(send.email, send.subject, send.body);
+      const success = await sendEmail(send.email, send.subject, send.body, send.attachments || []);
 
       updateData(prev => ({
         ...prev,
@@ -2812,6 +2814,49 @@ function SalesPipelineApp({ onLogout }) {
                 <input style={s.input} placeholder="Konu (örn: {firma_adı} için özel teklif)" value={newTemplate.subject} onChange={e => setNewTemplate({ ...newTemplate, subject: e.target.value })} />
               </div>
               <textarea style={{ ...s.input, minHeight: 120, fontFamily: "inherit" }} placeholder="Mail içeriği... Kullanılabilir değişkenler: {firma_adı}, {kontakt_adı}, {kontakt_isim}, {kontakt_ünvan}" value={newTemplate.body} onChange={e => setNewTemplate({ ...newTemplate, body: e.target.value })} />
+
+              {/* Attachments */}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <label style={{ fontSize: 11, color: colors.textMuted }}>Ekler:</label>
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    id="template-attachment-input"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      const attachments = await Promise.all(files.map(async (file) => {
+                        const base64 = await new Promise((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(reader.result.split(",")[1]);
+                          reader.readAsDataURL(file);
+                        });
+                        return { name: file.name, type: file.type, size: file.size, base64 };
+                      }));
+                      setNewTemplate(prev => ({ ...prev, attachments: [...(prev.attachments || []), ...attachments] }));
+                      e.target.value = "";
+                    }}
+                  />
+                  <button style={s.btn()} onClick={() => document.getElementById("template-attachment-input").click()}>
+                    📎 Dosya Ekle
+                  </button>
+                </div>
+                {(newTemplate.attachments || []).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {newTemplate.attachments.map((att, idx) => (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: colors.surfaceHover, borderRadius: 4, fontSize: 11 }}>
+                        <span>📄 {att.name}</span>
+                        <span style={{ color: colors.textDim }}>({(att.size / 1024).toFixed(1)} KB)</span>
+                        <button style={{ background: "none", border: "none", color: colors.red, cursor: "pointer", padding: 0 }} onClick={() => {
+                          setNewTemplate(prev => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }));
+                        }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
                 <button style={s.btn("primary")} onClick={addTemplate}><PlusIcon size={14}/> Şablon Ekle</button>
               </div>
@@ -2829,6 +2874,7 @@ function SalesPipelineApp({ onLogout }) {
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <Badge color={colors.green} bg={colors.greenDim}>{t.sentCount || 0} gönderildi</Badge>
                       <Badge color={colors.purple} bg="#2d1a4e">{t.replyCount || 0} cevap</Badge>
+                      {(t.attachments?.length > 0) && <Badge color={colors.textMuted} bg={colors.surfaceHover}>📎 {t.attachments.length} ek</Badge>}
                       {t.sentCount > 0 && <Badge color={colors.yellow} bg={colors.yellowDim}>{Math.round((t.replyCount || 0) / t.sentCount * 100)}% başarı</Badge>}
                       <button style={{ ...s.btn("danger"), padding: "4px 8px" }} onClick={() => deleteTemplate(t.id)}><TrashIcon size={12}/></button>
                     </div>
@@ -2851,9 +2897,22 @@ function SalesPipelineApp({ onLogout }) {
             {/* Left: Contact Selection */}
             <div style={s.card}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Kontakt Seç ({selectedCampaignContacts.length} seçili)</div>
-              <div style={{ maxHeight: 400, overflowY: "auto" }}>
+              <input
+                type="text"
+                style={{ ...s.input, marginBottom: 12 }}
+                placeholder="🔍 Kontakt veya firma ara..."
+                value={contactSearchQuery}
+                onChange={e => setContactSearchQuery(e.target.value)}
+              />
+              <div style={{ maxHeight: 360, overflowY: "auto" }}>
                 {data.companies.map(company => {
-                  const companyContacts = contactsWithEmail.filter(c => c.companyId === company.id);
+                  const companyContacts = contactsWithEmail.filter(c => c.companyId === company.id &&
+                    (contactSearchQuery === "" ||
+                     c.name?.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
+                     c.email?.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
+                     company.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())
+                    )
+                  );
                   if (companyContacts.length === 0) return null;
                   return (
                     <div key={company.id} style={{ marginBottom: 12 }}>
