@@ -470,9 +470,9 @@ const saveDataToLocal = (data) => {
 
 // Supabase functions
 const loadDataFromSupabase = async () => {
-  if (!supabase) return null;
+  if (!supabaseClient) return null;
   try {
-    const { data: record, error } = await supabase
+    const { data: record, error } = await supabaseClient
       .from('app_data')
       .select('data')
       .eq('user_id', 'default')
@@ -486,9 +486,9 @@ const loadDataFromSupabase = async () => {
 };
 
 const saveDataToSupabase = async (data) => {
-  if (!supabase) return false;
+  if (!supabaseClient) return false;
   try {
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from('app_data')
       .upsert({ user_id: 'default', data, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     if (error) throw error;
