@@ -410,7 +410,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 // Supabase client (sadece config doğruysa aktif)
 const supabaseEnabled = SUPABASE_URL !== "https://your-project.supabase.co" && SUPABASE_ANON_KEY !== "your-anon-key";
-const supabase = supabaseEnabled ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const supabaseClient = supabaseEnabled ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 // MICROSOFT GRAPH API CONFIG
 const MS_CLIENT_ID = "e5b5ae7b-0b95-4955-8e99-ee50bf1209f8";
