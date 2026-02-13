@@ -2488,15 +2488,80 @@ function SalesPipelineApp({ onLogout }) {
       byWeek["unassigned"] = withoutWeek;
     }
 
+    // State for new todo form
+    const [showTodoForm, setShowTodoForm] = React.useState(false);
+    const today = new Date().toISOString().split("T")[0];
+    const [newTodoText, setNewTodoText] = React.useState("");
+    const [newTodoDate, setNewTodoDate] = React.useState(today);
+    const [newTodoWeek, setNewTodoWeek] = React.useState(currentWeek);
+    const [newTodoDateType, setNewTodoDateType] = React.useState("date"); // "date" or "week"
+
+    const addNewTodo = () => {
+      if (!newTodoText.trim()) return;
+      const newTodo = {
+        id: uid(),
+        text: newTodoText.trim(),
+        type: "manual",
+        category: "genel",
+        priority: 3,
+        done: false,
+        createdAt: new Date().toISOString(),
+        targetDate: newTodoDateType === "date" ? newTodoDate : null,
+        targetWeek: newTodoDateType === "week" ? newTodoWeek : (newTodoDateType === "date" ? getWeekNumber(new Date(newTodoDate)) : null),
+        targetYear: currentYear
+      };
+      updateData(prev => ({ ...prev, todos: [...(prev.todos || []), newTodo] }));
+      setNewTodoText("");
+      setNewTodoDate(today);
+      setShowTodoForm(false);
+      showSync("To-do eklendi ✓");
+    };
+
     return (
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
           <div style={{ fontSize: 18, fontWeight: 800 }}>To-Do ({allTodos.length})</div>
-          <button style={s.btn("primary")} onClick={() => {
-            const text = prompt("Yeni to-do:");
-            if (text) updateData(prev => ({ ...prev, todos: [...(prev.todos || []), { id: uid(), text, type: "manual", category: "genel", priority: 5, done: false, createdAt: new Date().toISOString() }] }));
-          }}><PlusIcon size={14}/> Ekle</button>
+          <button style={s.btn("primary")} onClick={() => setShowTodoForm(!showTodoForm)}><PlusIcon size={14}/> Ekle</button>
         </div>
+
+        {/* New Todo Form */}
+        {showTodoForm && (
+          <div style={{ ...s.card, marginBottom: 16, background: colors.yellowDim, border: `2px solid ${colors.yellow}` }}>
+            <div style={{ display: "grid", gap: 10 }}>
+              <input
+                type="text"
+                style={{ ...s.input, fontSize: 14 }}
+                placeholder="To-do maddesi..."
+                value={newTodoText}
+                onChange={e => setNewTodoText(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addNewTodo()}
+                autoFocus
+              />
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                    <input type="radio" name="todoDateType" checked={newTodoDateType === "date"} onChange={() => setNewTodoDateType("date")} />
+                    Gün
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                    <input type="radio" name="todoDateType" checked={newTodoDateType === "week"} onChange={() => setNewTodoDateType("week")} />
+                    Hafta
+                  </label>
+                </div>
+                {newTodoDateType === "date" ? (
+                  <input type="date" style={{ ...s.input, width: 150 }} value={newTodoDate} onChange={e => setNewTodoDate(e.target.value)} />
+                ) : (
+                  <select style={{ ...s.select, width: 100 }} value={newTodoWeek} onChange={e => setNewTodoWeek(parseInt(e.target.value))}>
+                    {[...Array(12)].map((_, i) => <option key={i} value={currentWeek + i}>Hafta {currentWeek + i}</option>)}
+                  </select>
+                )}
+                <div style={{ flex: 1 }} />
+                <button style={s.btn("success")} onClick={addNewTodo}>✓ Ekle</button>
+                <button style={s.btn("secondary")} onClick={() => setShowTodoForm(false)}>İptal</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {Object.entries(byWeek)
           .sort((a, b) => {
@@ -2513,9 +2578,10 @@ function SalesPipelineApp({ onLogout }) {
               {items.map(todo => {
                 const dateStr = todo.targetDate ? new Date(todo.targetDate).toLocaleDateString("tr", { day: "numeric", month: "short" }) : null;
                 const isToday = todo.targetDate === new Date().toISOString().split("T")[0];
+                const isManual = todo.type === "manual";
                 return (
-                  <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                    {todo.type === "manual" && (
+                  <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 6, background: isManual ? "#2d2418" : colors.surface, borderLeft: isManual ? `3px solid ${colors.orange}` : "none" }}>
+                    {isManual && (
                       <input type="checkbox" checked={false} onChange={() => {
                         updateData(prev => ({
                           ...prev,
@@ -2528,8 +2594,8 @@ function SalesPipelineApp({ onLogout }) {
                     </span>
                     <span style={{ flex: 1, fontSize: 12 }}>{todo.text}</span>
                     {todo.profileKey && <Badge color={colors.yellow} bg={colors.yellowDim}>❓</Badge>}
-                    {todo.type === "auto" && <Badge color={colors.textDim} bg={colors.surfaceHover}>otomatik</Badge>}
-                    {todo.type === "manual" && (
+                    {!isManual && <Badge color={colors.textDim} bg={colors.surfaceHover}>otomatik</Badge>}
+                    {isManual && (
                       <>
                         {/* Show date badge if date is set, otherwise show week picker */}
                         {todo.targetDate ? (
