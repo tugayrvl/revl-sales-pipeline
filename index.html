@@ -696,9 +696,13 @@ function SalesPipelineApp({ onLogout }) {
   );
 
   // Also include followups that don't have a specific week assigned but are active
+  // Exclude companies deferred to a future week
   const allFollowups = useMemo(() =>
-    data.companies.filter(c => c.trackingType === "followup"),
-    [data.companies]
+    data.companies.filter(c =>
+      c.trackingType === "followup" &&
+      (!c.deferredToWeek || c.deferredToWeek <= selectedWeek)
+    ),
+    [data.companies, selectedWeek]
   );
 
   const getContacts = useCallback((companyId) =>
@@ -1530,6 +1534,31 @@ function SalesPipelineApp({ onLogout }) {
             </div>
           )}
         </div>
+        {/* Defer button for followup companies */}
+        {type === "followup" && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${colors.border}` }}>
+            <select
+              style={{ ...s.select, fontSize: 10, padding: "3px 6px", background: colors.surfaceHover, color: colors.textMuted }}
+              value=""
+              onChange={(e) => {
+                const weeks = parseInt(e.target.value);
+                if (weeks > 0) {
+                  updateCompanyField(company.id, "deferredToWeek", selectedWeek + weeks);
+                  showSync(`Firma H${selectedWeek + weeks}'e devredildi ✓`);
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="">⏩ Devret</option>
+              <option value="1">+1 hafta (H{selectedWeek + 1})</option>
+              <option value="2">+2 hafta (H{selectedWeek + 2})</option>
+              <option value="3">+3 hafta (H{selectedWeek + 3})</option>
+              <option value="4">+4 hafta (H{selectedWeek + 4})</option>
+              <option value="6">+6 hafta (H{selectedWeek + 6})</option>
+              <option value="8">+8 hafta (H{selectedWeek + 8})</option>
+            </select>
+          </div>
+        )}
       </div>
     );
   };
