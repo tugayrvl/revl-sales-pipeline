@@ -2827,7 +2827,7 @@ function SalesPipelineApp({ onLogout }) {
                     </div>
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <Badge color={colors.green} bg={colors.greenDim}>{t.sentCount || 0} gönderildi</Badge>
-                      <Badge color={colors.purple} bg="#2d1a4e"}>{t.replyCount || 0} cevap</Badge>
+                      <Badge color={colors.purple} bg="#2d1a4e">{t.replyCount || 0} cevap</Badge>
                       {t.sentCount > 0 && <Badge color={colors.yellow} bg={colors.yellowDim}>{Math.round((t.replyCount || 0) / t.sentCount * 100)}% başarı</Badge>}
                       <button style={{ ...s.btn("danger"), padding: "4px 8px" }} onClick={() => deleteTemplate(t.id)}><TrashIcon size={12}/></button>
                     </div>
