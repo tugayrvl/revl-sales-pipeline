@@ -2586,7 +2586,7 @@ function SalesPipelineApp({ onLogout }) {
                 const isToday = todo.targetDate === new Date().toISOString().split("T")[0];
                 const isManual = todo.type === "manual";
                 return (
-                  <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 6, background: isManual ? "#2d2418" : colors.surface, borderLeft: isManual ? `3px solid ${colors.orange}` : "none" }}>
+                  <div key={todo.id} style={{ ...s.card, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 6, background: isManual ? "rgba(16, 185, 129, 0.15)" : colors.surface, borderLeft: isManual ? `3px solid ${colors.green}` : "none" }}>
                     {isManual && (
                       <input type="checkbox" checked={false} onChange={() => {
                         updateData(prev => ({
