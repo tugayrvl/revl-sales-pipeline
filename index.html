@@ -1774,7 +1774,8 @@ function SalesPipelineApp({ onLogout }) {
                 <th style={{ ...s.th, width: "8%" }}>Hafta</th>
                 <th style={{ ...s.th, width: "8%" }}>Takip</th>
                 <th style={{ ...s.th, width: "8%" }}>Kategori</th>
-                <th style={{ ...s.th, width: "8%" }}>Öncelik</th>
+                <th style={{ ...s.th, width: "6%" }}>Öncelik</th>
+                <th style={{ ...s.th, width: "4%" }}></th>
               </tr>
             </thead>
             <tbody>
@@ -1903,6 +1904,15 @@ function SalesPipelineApp({ onLogout }) {
                         <option value="low">Düşük</option>
                       </select>
                     </td>
+                    <td style={s.td}>
+                      <button
+                        style={{ ...s.btn("danger"), padding: "4px 6px" }}
+                        onClick={() => deleteCompany(c.id)}
+                        title="Firmayı sil"
+                      >
+                        <TrashIcon size={12}/>
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -1918,6 +1928,17 @@ function SalesPipelineApp({ onLogout }) {
   // ============================================================
 
   const [newCompetitor, setNewCompetitor] = useState({ name: "", priceStrategy: "monthly", priceMin: "", priceMax: "", strength: "", weakness: "" });
+
+  const deleteCompany = (companyId) => {
+    if (!confirm("Bu firmayı silmek istediğinize emin misiniz? İlgili tüm kontaktlar da silinecek.")) return;
+    updateData(prev => ({
+      ...prev,
+      companies: prev.companies.filter(c => c.id !== companyId),
+      contacts: prev.contacts.filter(c => c.companyId !== companyId),
+      callLogs: prev.callLogs.filter(l => l.companyId !== companyId)
+    }));
+    showSync("Firma silindi ✓");
+  };
 
   const addCompetitor = () => {
     if (!newCompetitor.name.trim()) return;
