@@ -3108,11 +3108,12 @@ function SalesPipelineApp({ onLogout }) {
               />
               <div style={{ maxHeight: 360, overflowY: "auto" }}>
                 {data.companies.map(company => {
+                  const searchQuery = turkishLower(contactSearchQuery);
                   const companyContacts = contactsWithEmail.filter(c => c.companyId === company.id &&
                     (contactSearchQuery === "" ||
-                     c.name?.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
-                     c.email?.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
-                     company.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())
+                     turkishLower(c.name || "").includes(searchQuery) ||
+                     turkishLower(c.email || "").includes(searchQuery) ||
+                     turkishLower(company.name || "").includes(searchQuery)
                     )
                   );
                   if (companyContacts.length === 0) return null;
