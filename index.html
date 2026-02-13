@@ -587,6 +587,7 @@ function SalesPipelineApp({ onLogout }) {
   const [weekFilter, setWeekFilter] = useState("all"); // "all" | "ready" | "no_contact" | "followup"
   const [companyFilter, setCompanyFilter] = useState({ device: "all", phone: "all", assigned: "all" }); // device: all|none|competitor, phone: all|has_phone|no_phone, assigned: all|unassigned|assigned
   const [targetWeekPicker, setTargetWeekPicker] = useState(null); // { companyId, show }
+  const [deferDropdown, setDeferDropdown] = useState(null); // companyId of open defer dropdown
   const [assignWeek, setAssignWeek] = useState(currentWeek);
   const [selectedContact, setSelectedContact] = useState(null); // For contact profile modal
   const [showCallPanel, setShowCallPanel] = useState(false); // Separate state for call panel (can coexist with modals)
@@ -1533,32 +1534,43 @@ function SalesPipelineApp({ onLogout }) {
               {company.deviceStatus === "none" ? "Cihaz Yok" : company.deviceStatus === "ours" ? "Bizde" : company.deviceStatus === "competitor" ? `Cihaz Var${company.deviceBrand ? ` / ${company.deviceBrand}` : ""}` : ""}
             </div>
           )}
+          {/* Defer button for followup companies - bottom right */}
+          {type === "followup" && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 6 }}>
+              {deferDropdown === company.id && (
+                <select
+                  autoFocus
+                  style={{ ...s.select, fontSize: 10, padding: "3px 6px", background: colors.surfaceHover, color: colors.text }}
+                  value=""
+                  onChange={(e) => {
+                    const weeks = parseInt(e.target.value);
+                    if (weeks > 0) {
+                      updateCompanyField(company.id, "deferredToWeek", selectedWeek + weeks);
+                      showSync(`Firma H${selectedWeek + weeks}'e devredildi ✓`);
+                    }
+                    setDeferDropdown(null);
+                  }}
+                  onBlur={() => setDeferDropdown(null)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <option value="">Hafta seç...</option>
+                  <option value="1">H{selectedWeek + 1} (+1)</option>
+                  <option value="2">H{selectedWeek + 2} (+2)</option>
+                  <option value="3">H{selectedWeek + 3} (+3)</option>
+                  <option value="4">H{selectedWeek + 4} (+4)</option>
+                  <option value="6">H{selectedWeek + 6} (+6)</option>
+                  <option value="8">H{selectedWeek + 8} (+8)</option>
+                </select>
+              )}
+              <button
+                style={{ ...s.btn(), fontSize: 10, padding: "3px 8px" }}
+                onClick={(e) => { e.stopPropagation(); setDeferDropdown(deferDropdown === company.id ? null : company.id); }}
+              >
+                ⏩ Devret
+              </button>
+            </div>
+          )}
         </div>
-        {/* Defer button for followup companies */}
-        {type === "followup" && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${colors.border}` }}>
-            <select
-              style={{ ...s.select, fontSize: 10, padding: "3px 6px", background: colors.surfaceHover, color: colors.textMuted }}
-              value=""
-              onChange={(e) => {
-                const weeks = parseInt(e.target.value);
-                if (weeks > 0) {
-                  updateCompanyField(company.id, "deferredToWeek", selectedWeek + weeks);
-                  showSync(`Firma H${selectedWeek + weeks}'e devredildi ✓`);
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <option value="">⏩ Devret</option>
-              <option value="1">+1 hafta (H{selectedWeek + 1})</option>
-              <option value="2">+2 hafta (H{selectedWeek + 2})</option>
-              <option value="3">+3 hafta (H{selectedWeek + 3})</option>
-              <option value="4">+4 hafta (H{selectedWeek + 4})</option>
-              <option value="6">+6 hafta (H{selectedWeek + 6})</option>
-              <option value="8">+8 hafta (H{selectedWeek + 8})</option>
-            </select>
-          </div>
-        )}
       </div>
     );
   };
