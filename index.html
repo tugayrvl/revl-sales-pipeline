@@ -2118,112 +2118,174 @@ function SalesPipelineApp({ onLogout }) {
   // CONTACTS PAGE
   // ============================================================
 
+  const [editingContactId, setEditingContactId] = useState(null);
+  const [editingContactData, setEditingContactData] = useState({});
+
   const renderContacts = () => {
     const allContacts = data.contacts || [];
 
-    // Filter contacts based on search (primarily phone number)
+    // Filter contacts based on search (all fields)
     const filteredContacts = allContacts.filter(contact => {
       if (!contactsPageSearch.trim()) return true;
-      const search = contactsPageSearch.toLowerCase().replace(/\s/g, "");
-      const phone = (contact.phone || "").replace(/\s/g, "").toLowerCase();
-      const name = (contact.name || "").toLowerCase();
-      const email = (contact.email || "").toLowerCase();
+      const search = turkishLower(contactsPageSearch.replace(/\s/g, ""));
       const company = data.companies.find(c => c.id === contact.companyId);
-      const companyName = (company?.name || "").toLowerCase();
 
-      return phone.includes(search) || name.includes(search) || email.includes(search) || companyName.includes(search);
+      const phone1 = (contact.phone || "").replace(/\s/g, "");
+      const phone2 = (contact.phone2 || "").replace(/\s/g, "");
+      const name = turkishLower(contact.name || "");
+      const title = turkishLower(contact.title || "");
+      const email = turkishLower(contact.email || "");
+      const companyName = turkishLower(company?.name || "");
+      const industry = turkishLower(company?.industry || "");
+
+      return phone1.includes(search) || phone2.includes(search) || name.includes(search) ||
+             title.includes(search) || email.includes(search) || companyName.includes(search) || industry.includes(search);
     });
 
     // Sort by company name
     const sortedContacts = [...filteredContacts].sort((a, b) => {
       const companyA = data.companies.find(c => c.id === a.companyId)?.name || "";
       const companyB = data.companies.find(c => c.id === b.companyId)?.name || "";
-      return companyA.localeCompare(companyB);
+      return turkishLower(companyA).localeCompare(turkishLower(companyB), "tr");
     });
+
+    const cellStyle = { padding: "8px 6px", fontSize: 11, borderBottom: `1px solid ${colors.border}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+    const headerStyle = { ...cellStyle, fontWeight: 700, color: colors.textMuted, fontSize: 10, background: colors.surfaceHover };
+    const btnSmall = { padding: "4px 6px", fontSize: 10, border: "none", borderRadius: 4, cursor: "pointer", background: colors.surfaceHover, color: colors.text };
+
+    const startEdit = (contact) => {
+      setEditingContactId(contact.id);
+      setEditingContactData({ name: contact.name || "", title: contact.title || "", phone: contact.phone || "", phone2: contact.phone2 || "", email: contact.email || "" });
+    };
+
+    const saveEdit = (contactId) => {
+      updateData(prev => ({
+        ...prev,
+        contacts: prev.contacts.map(c => c.id === contactId ? { ...c, ...editingContactData } : c)
+      }));
+      setEditingContactId(null);
+      showSync("Kontakt güncellendi ✓");
+    };
+
+    const deleteContact = (contactId) => {
+      if (!confirm("Bu kontaktı silmek istediğinize emin misiniz?")) return;
+      updateData(prev => ({
+        ...prev,
+        contacts: prev.contacts.filter(c => c.id !== contactId)
+      }));
+      showSync("Kontakt silindi ✓");
+    };
 
     return (
       <div>
         <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>Tüm Kontaktlar ({allContacts.length})</div>
 
-        {/* Phone Search Bar */}
-        <div style={{ ...s.card, marginBottom: 16 }}>
+        {/* Search Bar */}
+        <div style={{ ...s.card, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <input
             type="text"
-            style={{ ...s.input, fontSize: 16, padding: "12px 16px" }}
-            placeholder="📞 Telefon numarası veya isim ile ara..."
+            style={{ ...s.input, fontSize: 14, padding: "10px 14px", flex: 1 }}
+            placeholder="🔍 İsim, ünvan, telefon, email, şirket veya sektör ara..."
             value={contactsPageSearch}
             onChange={e => setContactsPageSearch(e.target.value)}
             autoFocus
           />
           {contactsPageSearch && (
-            <div style={{ marginTop: 8, fontSize: 12, color: colors.textMuted }}>
-              {filteredContacts.length} sonuç bulundu
-            </div>
+            <span style={{ fontSize: 12, color: colors.textMuted, whiteSpace: "nowrap" }}>
+              {filteredContacts.length} sonuç
+            </span>
           )}
         </div>
 
-        {/* Contact List */}
-        <div style={{ display: "grid", gap: 8 }}>
-          {sortedContacts.map(contact => {
-            const company = data.companies.find(c => c.id === contact.companyId);
-            const profile = contact.profile || {};
+        {/* Contact Table */}
+        <div style={{ ...s.card, padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+            <thead>
+              <tr>
+                <th style={{ ...headerStyle, width: 140 }}>İsim Soyisim</th>
+                <th style={{ ...headerStyle, width: 100 }}>Ünvan</th>
+                <th style={{ ...headerStyle, width: 110 }}>Telefon 1</th>
+                <th style={{ ...headerStyle, width: 110 }}>Telefon 2</th>
+                <th style={{ ...headerStyle, width: 160 }}>Email</th>
+                <th style={{ ...headerStyle, width: 120 }}>Şirket</th>
+                <th style={{ ...headerStyle, width: 80 }}>Sektör</th>
+                <th style={{ ...headerStyle, width: 140, textAlign: "center" }}>İşlemler</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedContacts.map(contact => {
+                const company = data.companies.find(c => c.id === contact.companyId);
+                const isEditing = editingContactId === contact.id;
 
-            return (
-              <div
-                key={contact.id}
-                style={{
-                  ...s.card,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  cursor: "pointer",
-                  transition: "background 0.15s ease"
-                }}
-                onClick={() => {
-                  if (company) {
-                    setExpandedFirm(company.id);
-                    setActiveTab("weekly");
-                  }
-                }}
-                onMouseOver={e => e.currentTarget.style.background = colors.surfaceHover}
-                onMouseOut={e => e.currentTarget.style.background = colors.surface}
-              >
-                {/* Contact Info */}
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{contact.name || "İsimsiz"}</span>
-                    {contact.title && <span style={{ fontSize: 11, color: colors.textMuted }}>• {contact.title}</span>}
-                    {profile.decisionAuth && <Badge color={colors.purple} bg="#2d1a4e">👤 {profile.decisionAuth}</Badge>}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
-                    {contact.phone && (
-                      <span style={{ color: colors.green, fontWeight: 600 }}>📞 {contact.phone}</span>
-                    )}
-                    {contact.email && (
-                      <span style={{ color: colors.yellow }}>✉️ {contact.email}</span>
-                    )}
-                  </div>
-                  {(profile.painPoints || profile.needs) && (
-                    <div style={{ fontSize: 10, color: colors.textDim, marginTop: 4 }}>
-                      {profile.painPoints && <span>🎯 {profile.painPoints}</span>}
-                      {profile.needs && <span style={{ marginLeft: 8 }}>💡 {profile.needs}</span>}
-                    </div>
-                  )}
-                </div>
-
-                {/* Company Badge */}
-                {company && (
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: colors.accent }}>{company.name}</div>
-                    <div style={{ fontSize: 10, color: colors.textDim }}>{company.industry || "Sektör belirtilmedi"}</div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                return (
+                  <tr key={contact.id} style={{ background: isEditing ? colors.accentDim : "transparent" }}>
+                    <td style={cellStyle}>
+                      {isEditing ? (
+                        <input type="text" value={editingContactData.name} onChange={e => setEditingContactData({ ...editingContactData, name: e.target.value })} style={{ ...s.input, padding: "2px 4px", fontSize: 11, width: "100%" }} />
+                      ) : (
+                        <span style={{ fontWeight: 600 }}>{contact.name || "-"}</span>
+                      )}
+                    </td>
+                    <td style={cellStyle}>
+                      {isEditing ? (
+                        <input type="text" value={editingContactData.title} onChange={e => setEditingContactData({ ...editingContactData, title: e.target.value })} style={{ ...s.input, padding: "2px 4px", fontSize: 11, width: "100%" }} />
+                      ) : (
+                        <span style={{ color: colors.textMuted }}>{contact.title || "-"}</span>
+                      )}
+                    </td>
+                    <td style={cellStyle}>
+                      {isEditing ? (
+                        <input type="text" value={editingContactData.phone} onChange={e => setEditingContactData({ ...editingContactData, phone: e.target.value })} style={{ ...s.input, padding: "2px 4px", fontSize: 11, width: "100%" }} />
+                      ) : (
+                        <span style={{ color: contact.phone ? colors.green : colors.textDim }}>{contact.phone || "-"}</span>
+                      )}
+                    </td>
+                    <td style={cellStyle}>
+                      {isEditing ? (
+                        <input type="text" value={editingContactData.phone2} onChange={e => setEditingContactData({ ...editingContactData, phone2: e.target.value })} style={{ ...s.input, padding: "2px 4px", fontSize: 11, width: "100%" }} />
+                      ) : (
+                        <span style={{ color: contact.phone2 ? colors.green : colors.textDim }}>{contact.phone2 || "-"}</span>
+                      )}
+                    </td>
+                    <td style={cellStyle}>
+                      {isEditing ? (
+                        <input type="text" value={editingContactData.email} onChange={e => setEditingContactData({ ...editingContactData, email: e.target.value })} style={{ ...s.input, padding: "2px 4px", fontSize: 11, width: "100%" }} />
+                      ) : (
+                        <span style={{ color: contact.email ? colors.yellow : colors.textDim, fontSize: 10 }}>{contact.email || "-"}</span>
+                      )}
+                    </td>
+                    <td style={cellStyle}>
+                      <span
+                        style={{ color: colors.accent, cursor: "pointer", fontWeight: 500 }}
+                        onClick={() => { if (company) { setExpandedFirm(company.id); setActiveTab("weekly"); } }}
+                      >
+                        {company?.name || "-"}
+                      </span>
+                    </td>
+                    <td style={{ ...cellStyle, fontSize: 10, color: colors.textDim }}>{company?.industry || "-"}</td>
+                    <td style={{ ...cellStyle, textAlign: "center" }}>
+                      {isEditing ? (
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          <button style={{ ...btnSmall, background: colors.green, color: "#fff" }} onClick={() => saveEdit(contact.id)}>💾</button>
+                          <button style={{ ...btnSmall }} onClick={() => setEditingContactId(null)}>✕</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          <button style={btnSmall} title="Arama Notu" onClick={(e) => { e.stopPropagation(); setCallLogContact(contact); setCallLogCompany(company); }}>📞</button>
+                          <button style={btnSmall} title="Karakter Profili" onClick={(e) => { e.stopPropagation(); setCharProfileContact(contact); setCharProfileCompany(company); }}>🧠</button>
+                          <button style={btnSmall} title="Düzenle" onClick={(e) => { e.stopPropagation(); startEdit(contact); }}>✏️</button>
+                          <button style={{ ...btnSmall, color: colors.red }} title="Sil" onClick={(e) => { e.stopPropagation(); deleteContact(contact.id); }}>🗑️</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
 
           {sortedContacts.length === 0 && (
-            <div style={{ ...s.card, textAlign: "center", color: colors.textMuted, padding: 40 }}>
+            <div style={{ textAlign: "center", color: colors.textMuted, padding: 40 }}>
               {contactsPageSearch ? "Arama sonucu bulunamadı" : "Henüz kontakt eklenmemiş"}
             </div>
           )}
