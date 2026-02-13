@@ -2674,10 +2674,12 @@ function SalesPipelineApp({ onLogout }) {
   // ============================================================
 
   const [msAccount, setMsAccount] = useState(null);
-  const [coldMailTab, setColdMailTab] = useState("templates"); // templates, campaigns, queue, logs
+  const [coldMailTab, setColdMailTab] = useState("templates"); // templates, campaigns, queue, logs, tracking
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [newTemplate, setNewTemplate] = useState({ name: "", subject: "", body: "", attachmentIds: [] });
   const [selectedCampaignContacts, setSelectedCampaignContacts] = useState([]);
+  const [followUpTemplate, setFollowUpTemplate] = useState("");
+  const [selectedForFollowUp, setSelectedForFollowUp] = useState([]);
 
   // File Library - stored in data.coldMailFiles
   const fileLibrary = data.coldMailFiles || [];
@@ -3547,9 +3549,6 @@ function SalesPipelineApp({ onLogout }) {
           const urgent = trackingData.filter(t => t.daysSince >= 5);
           const waiting = trackingData.filter(t => t.daysSince < 5 && t.daysSince >= 2);
           const recent = trackingData.filter(t => t.daysSince < 2);
-
-          const [followUpTemplate, setFollowUpTemplate] = React.useState("");
-          const [selectedForFollowUp, setSelectedForFollowUp] = React.useState([]);
 
           const startFollowUp = () => {
             if (selectedForFollowUp.length === 0) {
