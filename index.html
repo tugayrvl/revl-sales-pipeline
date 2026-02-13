@@ -129,6 +129,10 @@ const getAuthState = () => {
   } catch { return { passwordHash: null, isSetup: false }; }
 };
 
+const setAuthState = (state) => {
+  localStorage.setItem(AUTH_KEY, JSON.stringify(state));
+};
+
 // Pre-set password - Initialize on load
 const PRESET_PASSWORD = "qZl62418Ij39nQJO2534";
 (async () => {
@@ -142,10 +146,6 @@ const PRESET_PASSWORD = "qZl62418Ij39nQJO2534";
     setAuthState({ passwordHash: hash, isSetup: true });
   }
 })();
-
-const setAuthState = (state) => {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(state));
-};
 
 const getLockoutState = () => {
   try {
