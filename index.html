@@ -713,6 +713,13 @@ function SalesPipelineApp({ onLogout }) {
   const [selectedContact, setSelectedContact] = useState(null); // For contact profile modal
   const [showCallPanel, setShowCallPanel] = useState(false); // Separate state for call panel (can coexist with modals)
 
+  // Todo form state
+  const [showTodoForm, setShowTodoForm] = useState(false);
+  const [newTodoText, setNewTodoText] = useState("");
+  const [newTodoDate, setNewTodoDate] = useState(new Date().toISOString().split("T")[0]);
+  const [newTodoWeek, setNewTodoWeek] = useState(currentWeek);
+  const [newTodoDateType, setNewTodoDateType] = useState("date");
+
   // Auto-save to localStorage + Supabase
   useEffect(() => { saveData(data); }, [data]);
 
@@ -2494,14 +2501,7 @@ function SalesPipelineApp({ onLogout }) {
       byWeek["unassigned"] = withoutWeek;
     }
 
-    // State for new todo form
-    const [showTodoForm, setShowTodoForm] = React.useState(false);
     const today = new Date().toISOString().split("T")[0];
-    const [newTodoText, setNewTodoText] = React.useState("");
-    const [newTodoDate, setNewTodoDate] = React.useState(today);
-    const [newTodoWeek, setNewTodoWeek] = React.useState(currentWeek);
-    const [newTodoDateType, setNewTodoDateType] = React.useState("date"); // "date" or "week"
-
     const addNewTodo = () => {
       if (!newTodoText.trim()) return;
       const newTodo = {
